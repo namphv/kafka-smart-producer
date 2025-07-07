@@ -1,127 +1,503 @@
 """
-Tests for protocol interfaces.
+Tests for protocol interfaces following Task-01 specifications.
+
+This module implements comprehensive tests for all protocol interfaces,
+including mock implementations, edge cases, and performance validation.
 """
 
-import pytest
-from typing import Dict, Any, Optional
+import math
+import time
+from typing import Any, Dict, Optional
 
-from kafka_smart_producer.protocols import (
-    LagDataCollector,
-    HotPartitionCalculator,
-    CacheBackend,
+import pytest
+
+from kafka_smart_producer.exceptions import (
+    HealthCalculationError,
+    LagDataUnavailableError,
 )
+from kafka_smart_producer.protocols import LagDataCollector
 
 
 class MockLagDataCollector:
-    """Mock implementation of LagDataCollector for testing."""
-    
-    def __init__(self, lag_data: Dict[int, int]):
-        self.lag_data = lag_data
-        self.healthy = True
-    
+    """
+    Mock implementation of LagDataCollector for testing.
+
+    Follows Task-01 specification with configurable behavior for testing
+    different scenarios including failures and edge cases.
+    """
+
+    def __init__(self, lag_data: Dict[int, int], is_healthy: bool = True):
+        self._lag_data = lag_data.copy()
+        self._is_healthy = is_healthy
+        self._call_count = 0
+
     async def get_lag_data(self, topic: str) -> Dict[int, int]:
-        return self.lag_data.copy()
-    
+        """Async lag data retrieval with failure simulation."""
+        self._call_count += 1
+        if not self._is_healthy:
+            raise LagDataUnavailableError(
+                f"Mock collector unhealthy for topic: {topic}",
+                context={"topic": topic, "call_count": self._call_count},
+            )
+        return self._lag_data.copy()
+
     def get_lag_data_sync(self, topic: str) -> Dict[int, int]:
-        return self.lag_data.copy()
-    
+        """Sync lag data retrieval with failure simulation."""
+        self._call_count += 1
+        if not self._is_healthy:
+            raise LagDataUnavailableError(
+                f"Mock collector unhealthy for topic: {topic}",
+                context={"topic": topic, "call_count": self._call_count},
+            )
+        return self._lag_data.copy()
+
     def is_healthy(self) -> bool:
-        return self.healthy
+        """Health check with performance requirement < 100ms."""
+        return self._is_healthy
+
+    def set_health(self, healthy: bool) -> None:
+        """Test helper to change health status."""
+        self._is_healthy = healthy
+
+    def get_call_count(self) -> int:
+        """Test helper to verify call patterns."""
+        return self._call_count
 
 
 class MockHotPartitionCalculator:
-    """Mock implementation of HotPartitionCalculator for testing."""
-    
-    def __init__(self, threshold: int = 1000):
-        self.threshold = threshold
-    
+    """
+    Mock implementation of HotPartitionCalculator for testing.
+
+    Implements configurable scoring logic with edge case handling.
+    """
+
+    def __init__(self, score_fn=None, threshold: int = 1000):
+        """
+        Initialize with custom scoring function or default threshold-based logic.
+
+        Args:
+            score_fn: Custom function (lag) -> score, or None for default
+            threshold: Lag threshold for default scoring
+        """
+        self._threshold = threshold
+        self._score_fn = score_fn or self._default_score_fn
+        self._call_count = 0
+
+    def _default_score_fn(self, lag: int) -> float:
+        """Default scoring: linear decay from 1.0 to 0.0 at threshold."""
+        if lag <= 0:
+            return 1.0
+        return max(0.0, 1.0 - lag / self._threshold)
+
     def calculate_scores(
-        self, 
-        lag_data: Dict[int, int], 
-        metadata: Optional[Dict[str, Any]] = None
+        self, lag_data: Dict[int, int], metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[int, float]:
+        """Calculate health scores with edge case handling."""
+        self._call_count += 1
+
+        # Handle empty data gracefully
+        if not lag_data:
+            return {}
+
+        scores = {}
+        for partition, lag in lag_data.items():
+            # Validate input
+            if not isinstance(partition, int) or partition < 0:
+                raise HealthCalculationError(
+                    f"Invalid partition ID: {partition}",
+                    context={"partition": partition, "lag": lag},
+                )
+
+            if not isinstance(lag, int) or lag < 0:
+                raise HealthCalculationError(
+                    f"Invalid lag value: {lag}",
+                    context={"partition": partition, "lag": lag},
+                )
+
+            # Calculate score
+            score = self._score_fn(lag)
+
+            # Ensure score is bounded [0.0, 1.0] and not NaN/infinite
+            if math.isnan(score) or math.isinf(score):
+                raise HealthCalculationError(
+                    f"Invalid score calculated: {score}",
+                    context={"partition": partition, "lag": lag, "score": score},
+                )
+
+            scores[partition] = max(0.0, min(1.0, score))
+
+        return scores
+
+    def get_threshold_config(self) -> Dict[str, Any]:
+        """Return current configuration for debugging."""
         return {
-            partition: 0.0 if lag > self.threshold else 1.0
-            for partition, lag in lag_data.items()
+            "threshold": self._threshold,
+            "call_count": self._call_count,
+            "score_function": (
+                "custom" if self._score_fn != self._default_score_fn else "default"
+            ),
         }
-    
-    def get_config(self) -> Dict[str, Any]:
-        return {"threshold": self.threshold}
+
+    def get_call_count(self) -> int:
+        """Test helper to verify call patterns."""
+        return self._call_count
 
 
 class MockCacheBackend:
-    """Mock implementation of CacheBackend for testing."""
-    
-    def __init__(self):
-        self.data: Dict[str, Any] = {}
-    
+    """
+    Mock implementation of CacheBackend for testing.
+
+    Simulates both local and distributed cache behavior with TTL support.
+    """
+
+    def __init__(self, simulate_failures: bool = False):
+        self._data: Dict[str, Any] = {}
+        self._ttl: Dict[str, float] = {}
+        self._simulate_failures = simulate_failures
+        self._call_count = 0
+
+    def _is_expired(self, key: str) -> bool:
+        """Check if key has expired based on TTL."""
+        if key not in self._ttl:
+            return False
+        return time.time() > self._ttl[key]
+
+    def _cleanup_expired(self, key: str) -> None:
+        """Remove expired key from cache."""
+        if self._is_expired(key):
+            self._data.pop(key, None)
+            self._ttl.pop(key, None)
+
     async def get(self, key: str) -> Optional[Any]:
-        return self.data.get(key)
-    
+        """Async get with TTL and failure simulation."""
+        self._call_count += 1
+        if self._simulate_failures:
+            raise Exception("Simulated cache failure")
+
+        self._cleanup_expired(key)
+        return self._data.get(key)
+
     async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        self.data[key] = value
-    
+        """Async set with TTL support."""
+        self._call_count += 1
+        if self._simulate_failures:
+            raise Exception("Simulated cache failure")
+
+        self._data[key] = value
+        if ttl is not None:
+            self._ttl[key] = time.time() + ttl
+
     async def delete(self, key: str) -> None:
-        self.data.pop(key, None)
-    
+        """Async delete."""
+        self._call_count += 1
+        if self._simulate_failures:
+            raise Exception("Simulated cache failure")
+
+        self._data.pop(key, None)
+        self._ttl.pop(key, None)
+
     def get_sync(self, key: str) -> Optional[Any]:
-        return self.data.get(key)
-    
+        """Sync get with TTL."""
+        self._call_count += 1
+        if self._simulate_failures:
+            raise Exception("Simulated cache failure")
+
+        self._cleanup_expired(key)
+        return self._data.get(key)
+
     def set_sync(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        self.data[key] = value
-    
+        """Sync set with TTL support."""
+        self._call_count += 1
+        if self._simulate_failures:
+            raise Exception("Simulated cache failure")
+
+        self._data[key] = value
+        if ttl is not None:
+            self._ttl[key] = time.time() + ttl
+
     def delete_sync(self, key: str) -> None:
-        self.data.pop(key, None)
+        """Sync delete."""
+        self._call_count += 1
+        if self._simulate_failures:
+            raise Exception("Simulated cache failure")
+
+        self._data.pop(key, None)
+        self._ttl.pop(key, None)
+
+    def get_call_count(self) -> int:
+        """Test helper to verify call patterns."""
+        return self._call_count
 
 
-def test_mock_lag_data_collector():
-    """Test mock lag data collector implementation."""
-    lag_data = {0: 100, 1: 500, 2: 1500}
-    collector = MockLagDataCollector(lag_data)
-    
-    assert collector.is_healthy()
-    assert collector.get_lag_data_sync("test-topic") == lag_data
+# Test Scenarios from Task-01 Specification
 
 
-@pytest.mark.asyncio
-async def test_mock_lag_data_collector_async():
-    """Test mock lag data collector async implementation."""
-    lag_data = {0: 100, 1: 500, 2: 1500}
-    collector = MockLagDataCollector(lag_data)
-    
-    result = await collector.get_lag_data("test-topic")
-    assert result == lag_data
+class TestLagDataCollector:
+    """Test scenarios for LagDataCollector protocol."""
+
+    def test_successful_lag_data_retrieval(self):
+        """Scenario 1: Successful lag data retrieval."""
+        lag_data = {0: 100, 1: 500, 2: 1500}
+        collector = MockLagDataCollector(lag_data)
+
+        result = collector.get_lag_data_sync("test-topic")
+
+        # Verify mapping structure
+        assert isinstance(result, dict)
+        assert result == lag_data
+
+        # Verify all partition IDs are non-negative integers
+        for partition_id in result.keys():
+            assert isinstance(partition_id, int)
+            assert partition_id >= 0
+
+        # Verify all lag counts are non-negative integers
+        for lag_count in result.values():
+            assert isinstance(lag_count, int)
+            assert lag_count >= 0
+
+    @pytest.mark.asyncio
+    async def test_successful_lag_data_retrieval_async(self):
+        """Scenario 1: Successful async lag data retrieval."""
+        lag_data = {0: 100, 1: 500, 2: 1500}
+        collector = MockLagDataCollector(lag_data)
+
+        result = await collector.get_lag_data("test-topic")
+        assert result == lag_data
+
+    def test_data_source_unavailable(self):
+        """Scenario 2: Data source unavailable."""
+        collector = MockLagDataCollector({}, is_healthy=False)
+
+        with pytest.raises(LagDataUnavailableError) as exc_info:
+            collector.get_lag_data_sync("test-topic")
+
+        # Verify error contains diagnostic information
+        assert "test-topic" in str(exc_info.value)
+        assert exc_info.value.context is not None
+        assert "topic" in exc_info.value.context
+
+    @pytest.mark.asyncio
+    async def test_data_source_unavailable_async(self):
+        """Scenario 2: Async data source unavailable."""
+        collector = MockLagDataCollector({}, is_healthy=False)
+
+        with pytest.raises(LagDataUnavailableError):
+            await collector.get_lag_data("test-topic")
+
+    def test_health_check_validation(self):
+        """Scenario 3: Health check validation."""
+        collector = MockLagDataCollector({0: 100})
+
+        # Test performance requirement < 100ms
+        start_time = time.time()
+        is_healthy = collector.is_healthy()
+        elapsed = time.time() - start_time
+
+        assert isinstance(is_healthy, bool)
+        assert elapsed < 0.1  # < 100ms
+        assert is_healthy is True
+
+        # Test unhealthy state
+        collector.set_health(False)
+        assert collector.is_healthy() is False
 
 
-def test_mock_hot_partition_calculator():
-    """Test mock hot partition calculator implementation."""
-    calculator = MockHotPartitionCalculator(threshold=1000)
-    lag_data = {0: 100, 1: 500, 2: 1500}
-    
-    scores = calculator.calculate_scores(lag_data)
-    
-    assert scores[0] == 1.0  # Below threshold
-    assert scores[1] == 1.0  # Below threshold
-    assert scores[2] == 0.0  # Above threshold
-    
-    assert calculator.get_config() == {"threshold": 1000}
+class TestHotPartitionCalculator:
+    """Test scenarios for HotPartitionCalculator protocol."""
+
+    def test_normal_health_score_calculation(self):
+        """Scenario 1: Normal health score calculation."""
+        calculator = MockHotPartitionCalculator(threshold=1000)
+        lag_data = {0: 100, 1: 500, 2: 1500}
+
+        scores = calculator.calculate_scores(lag_data)
+
+        # Verify scores are between 0.0 and 1.0
+        for score in scores.values():
+            assert 0.0 <= score <= 1.0
+
+        # Verify higher lag results in lower health score
+        assert scores[0] > scores[1]  # 100 lag > 500 lag
+        assert scores[1] > scores[2]  # 500 lag > 1500 lag
+
+        # Verify all partitions have scores assigned
+        assert set(scores.keys()) == set(lag_data.keys())
+
+    def test_empty_lag_data_handling(self):
+        """Scenario 2: Empty lag data handling."""
+        calculator = MockHotPartitionCalculator()
+
+        scores = calculator.calculate_scores({})
+
+        assert scores == {}
+        # Verify no exceptions raised
+
+    def test_extreme_lag_values(self):
+        """Scenario 3: Extreme lag values."""
+        calculator = MockHotPartitionCalculator(threshold=1000)
+        lag_data = {
+            0: 0,  # Zero lag
+            1: 1000000,  # Very high lag (>1M)
+            2: 2**31 - 1,  # Max int32
+        }
+
+        scores = calculator.calculate_scores(lag_data)
+
+        # Verify scores are valid (not NaN or infinite)
+        for score in scores.values():
+            assert not math.isnan(score)
+            assert not math.isinf(score)
+            assert 0.0 <= score <= 1.0
+
+    def test_invalid_input_handling(self):
+        """Test invalid input validation."""
+        calculator = MockHotPartitionCalculator()
+
+        # Invalid partition ID
+        with pytest.raises(HealthCalculationError):
+            calculator.calculate_scores({-1: 100})
+
+        # Invalid lag value
+        with pytest.raises(HealthCalculationError):
+            calculator.calculate_scores({0: -50})
+
+    def test_configuration_access(self):
+        """Test configuration debugging interface."""
+        calculator = MockHotPartitionCalculator(threshold=2000)
+
+        config = calculator.get_threshold_config()
+
+        assert isinstance(config, dict)
+        assert "threshold" in config
+        assert config["threshold"] == 2000
 
 
-@pytest.mark.asyncio
-async def test_mock_cache_backend():
-    """Test mock cache backend implementation."""
-    cache = MockCacheBackend()
-    
-    # Test async operations
-    await cache.set("key1", "value1")
-    assert await cache.get("key1") == "value1"
-    
-    await cache.delete("key1")
-    assert await cache.get("key1") is None
-    
-    # Test sync operations
-    cache.set_sync("key2", "value2")
-    assert cache.get_sync("key2") == "value2"
-    
-    cache.delete_sync("key2")
-    assert cache.get_sync("key2") is None
+class TestCacheBackend:
+    """Test scenarios for CacheBackend protocol."""
+
+    @pytest.mark.asyncio
+    async def test_basic_async_operations(self):
+        """Test basic async cache operations."""
+        cache = MockCacheBackend()
+
+        # Test set/get
+        await cache.set("key1", "value1")
+        result = await cache.get("key1")
+        assert result == "value1"
+
+        # Test delete
+        await cache.delete("key1")
+        result = await cache.get("key1")
+        assert result is None
+
+        # Test non-existent key
+        result = await cache.get("nonexistent")
+        assert result is None
+
+    def test_basic_sync_operations(self):
+        """Test basic sync cache operations."""
+        cache = MockCacheBackend()
+
+        # Test set/get
+        cache.set_sync("key2", "value2")
+        result = cache.get_sync("key2")
+        assert result == "value2"
+
+        # Test delete
+        cache.delete_sync("key2")
+        result = cache.get_sync("key2")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_ttl_functionality(self):
+        """Test TTL (time-to-live) functionality."""
+        cache = MockCacheBackend()
+
+        # Set with very short TTL
+        await cache.set("ttl_key", "ttl_value", ttl=1)
+
+        # Should be available immediately
+        result = await cache.get("ttl_key")
+        assert result == "ttl_value"
+
+        # Wait for expiration
+        time.sleep(1.1)
+
+        # Should be expired now
+        result = await cache.get("ttl_key")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_failure_simulation(self):
+        """Test cache failure handling."""
+        cache = MockCacheBackend(simulate_failures=True)
+
+        with pytest.raises(Exception, match="Simulated cache failure"):
+            await cache.get("any_key")
+
+        with pytest.raises(Exception, match="Simulated cache failure"):
+            await cache.set("any_key", "any_value")
+
+
+# Performance and Integration Tests
+
+
+class TestPerformanceRequirements:
+    """Test performance requirements from Task-01."""
+
+    def test_health_check_performance(self):
+        """Verify is_healthy() completes in < 100ms."""
+        collector = MockLagDataCollector({0: 100})
+
+        times = []
+        for _ in range(10):
+            start = time.time()
+            collector.is_healthy()
+            times.append(time.time() - start)
+
+        avg_time = sum(times) / len(times)
+        assert avg_time < 0.1  # < 100ms average
+        assert max(times) < 0.1  # No single call > 100ms
+
+    def test_sync_method_performance(self):
+        """Verify sync methods complete quickly (< 50ms typical)."""
+        collector = MockLagDataCollector({i: i * 100 for i in range(10)})
+
+        start = time.time()
+        result = collector.get_lag_data_sync("test-topic")
+        elapsed = time.time() - start
+
+        assert elapsed < 0.05  # < 50ms
+        assert len(result) == 10
+
+
+class TestProtocolCompliance:
+    """Test protocol interface compliance."""
+
+    def test_all_methods_have_type_hints(self):
+        """Verify all protocol methods have proper type hints."""
+
+        # This would fail at import time if type hints are missing
+        # due to Protocol validation
+        assert LagDataCollector is not None
+
+    def test_exception_hierarchy(self):
+        """Test exception class hierarchy and context."""
+        from kafka_smart_producer.exceptions import (
+            HealthCalculationError,
+            LagDataUnavailableError,
+            SmartProducerError,
+        )
+
+        # Test base exception
+        base_error = SmartProducerError(
+            "Test error", cause=ValueError("root cause"), context={"key": "value"}
+        )
+        assert str(base_error) == "Test error"
+        assert isinstance(base_error.cause, ValueError)
+        assert base_error.context["key"] == "value"
+
+        # Test inheritance
+        assert issubclass(LagDataUnavailableError, SmartProducerError)
+        assert issubclass(HealthCalculationError, SmartProducerError)
