@@ -21,6 +21,19 @@ from .exceptions import (
     PartitionSelectionError,
     SmartProducerError,
 )
+
+# Main producer classes (will be implemented in later tasks)
+# from .producers import SyncSmartProducer, AsyncSmartProducer
+# Health management
+from .health import (
+    DefaultHealthManager,
+    HealthManager,
+    HealthManagerConfig,
+    NoHealthyPartitionsError,
+    PartitionHealth,
+    PartitionSelectionStrategy,
+    TopicHealth,
+)
 from .protocols import CacheBackend, HotPartitionCalculator, LagDataCollector
 
 # Threading utilities
@@ -31,12 +44,6 @@ from .threading import (
     create_sync_background_refresh,
     run_periodic_async,
 )
-
-# Main producer classes (will be implemented in later tasks)
-# from .producers import SyncSmartProducer, AsyncSmartProducer
-
-# Health management
-# from .health import HealthManager
 
 # Default implementations
 # from .collectors import KafkaAdminLagCollector
@@ -61,10 +68,17 @@ __all__ = [
     "run_periodic_async",
     "create_async_background_task",
     "create_sync_background_refresh",
+    # Health management
+    "HealthManager",
+    "DefaultHealthManager",
+    "HealthManagerConfig",
+    "PartitionHealth",
+    "TopicHealth",
+    "PartitionSelectionStrategy",
+    "NoHealthyPartitionsError",
     # Future components
     # "SyncSmartProducer",
     # "AsyncSmartProducer",
-    # "HealthManager",
     # "KafkaAdminLagCollector",
     # "ThresholdHotPartitionCalculator",
 ]

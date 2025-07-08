@@ -58,6 +58,7 @@ repos:
         additional_dependencies:
           - types-redis
           - types-setuptools
+          - types-cachetools
         args: [--strict, --ignore-missing-imports]
         files: ^src/
 
