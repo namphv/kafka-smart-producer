@@ -10,6 +10,21 @@ __version__ = "0.1.0"
 __author__ = "Your Name"
 __email__ = "your.email@example.com"
 
+# Caching system
+from .caching import (
+    CacheConfig,
+    CacheEntry,
+    CacheLevel,
+    CacheStats,
+    CacheTimeoutError,
+    CacheUnavailableError,
+    DefaultHybridCache,
+    DefaultL1Cache,
+    HybridCache,
+    L1Cache,
+    L2Cache,
+)
+
 # Core protocol interfaces
 # Exception classes
 from .exceptions import (
@@ -62,6 +77,18 @@ __all__ = [
     "CacheError",
     "PartitionSelectionError",
     "ConfigurationError",
+    # Caching system
+    "L1Cache",
+    "L2Cache",
+    "HybridCache",
+    "DefaultL1Cache",
+    "DefaultHybridCache",
+    "CacheConfig",
+    "CacheEntry",
+    "CacheLevel",
+    "CacheStats",
+    "CacheTimeoutError",
+    "CacheUnavailableError",
     # Threading utilities
     "ThreadSafeCache",
     "SimpleBackgroundRefresh",
