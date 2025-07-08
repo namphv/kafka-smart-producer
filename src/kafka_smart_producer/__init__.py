@@ -23,6 +23,15 @@ from .exceptions import (
 )
 from .protocols import CacheBackend, HotPartitionCalculator, LagDataCollector
 
+# Threading utilities
+from .threading import (
+    SimpleBackgroundRefresh,
+    ThreadSafeCache,
+    create_async_background_task,
+    create_sync_background_refresh,
+    run_periodic_async,
+)
+
 # Main producer classes (will be implemented in later tasks)
 # from .producers import SyncSmartProducer, AsyncSmartProducer
 
@@ -46,6 +55,12 @@ __all__ = [
     "CacheError",
     "PartitionSelectionError",
     "ConfigurationError",
+    # Threading utilities
+    "ThreadSafeCache",
+    "SimpleBackgroundRefresh",
+    "run_periodic_async",
+    "create_async_background_task",
+    "create_sync_background_refresh",
     # Future components
     # "SyncSmartProducer",
     # "AsyncSmartProducer",

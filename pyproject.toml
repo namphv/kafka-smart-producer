@@ -7,6 +7,7 @@ requires-python = ">=3.8"
 dependencies = [
     "confluent-kafka>=2.0.0",
     "redis>=6.1.1",
+    "cachetools>=5.0.0",
 ]
 authors = [
     {name = "Your Name", email = "your.email@example.com"},
@@ -107,4 +108,5 @@ dev = [
     "pytest>=8.3.5",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.12.2",
+    "types-cachetools>=5.0.0",
 ]
