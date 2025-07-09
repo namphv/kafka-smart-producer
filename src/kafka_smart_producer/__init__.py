@@ -37,8 +37,6 @@ from .exceptions import (
     SmartProducerError,
 )
 
-# Main producer classes (will be implemented in later tasks)
-# from .producers import SyncSmartProducer, AsyncSmartProducer
 # Health management
 from .health import (
     DefaultHealthManager,
@@ -49,6 +47,9 @@ from .health import (
     PartitionSelectionStrategy,
     TopicHealth,
 )
+
+# Main producer classes
+from .producer import SyncSmartProducer
 from .protocols import CacheBackend, HotPartitionCalculator, LagDataCollector
 
 # Threading utilities
@@ -103,8 +104,9 @@ __all__ = [
     "TopicHealth",
     "PartitionSelectionStrategy",
     "NoHealthyPartitionsError",
+    # Producer classes
+    "SyncSmartProducer",
     # Future components
-    # "SyncSmartProducer",
     # "AsyncSmartProducer",
     # "KafkaAdminLagCollector",
     # "ThresholdHotPartitionCalculator",

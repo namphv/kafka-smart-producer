@@ -10,11 +10,16 @@ import logging
 import random
 import threading
 import time
+from abc import abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Set
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol, Set
 
 from cachetools import TTLCache
+from confluent_kafka import KafkaError, KafkaException
+from confluent_kafka import (
+    Producer as ConfluentProducer,  # type: ignore[import-untyped]
+)
 
 from .exceptions import PartitionSelectionError
 
@@ -253,6 +258,31 @@ class ProducerMetrics:
 class SmartProducerBase(Protocol):
     """Base interface for smart producers with health-aware partitioning."""
 
+    @abstractmethod
+    def __init__(
+        self,
+        config: "ProducerConfig",
+        health_manager: "HealthManager",
+        kafka_config: Dict[str, Any],
+    ) -> None:
+        """Initialize producer with configuration and health manager."""
+        ...
+
+    @abstractmethod
+    def produce(
+        self,
+        topic: str,
+        value: Optional[bytes] = None,
+        key: Optional[bytes] = None,
+        partition: Optional[int] = None,
+        on_delivery: Optional[Callable[["ProduceResult"], None]] = None,
+        timestamp: Optional[int] = None,
+        headers: Optional[Dict[str, bytes]] = None,
+    ) -> "ProduceResult":
+        """Produce a message to Kafka with smart partition selection."""
+        ...
+
+    @abstractmethod
     def select_partition(
         self,
         topic: str,
@@ -274,18 +304,22 @@ class SmartProducerBase(Protocol):
         """
         ...
 
+    @abstractmethod
     def get_topic_metadata(self, topic: str) -> Dict[str, Any]:
         """Get topic metadata including partition count."""
         ...
 
+    @abstractmethod
     def get_metrics(self) -> Dict[str, Any]:
         """Get producer performance metrics."""
         ...
 
+    @abstractmethod
     def close(self) -> None:
         """Close producer and cleanup resources."""
         ...
 
+    @abstractmethod
     def flush(self, timeout: Optional[float] = None) -> None:
         """Flush pending messages."""
         ...
@@ -482,6 +516,233 @@ class DefaultSmartProducerBase:
                 self._metrics.record_cache_hit()
             elif self._key_cache:  # Only record miss if caching is enabled
                 self._metrics.record_cache_miss()
+
+
+class SyncSmartProducer(DefaultSmartProducerBase):
+    """
+    Synchronous Kafka Smart Producer with intelligent partition selection.
+
+    This producer extends the DefaultSmartProducerBase with actual Kafka producer
+    functionality, providing synchronous message delivery with smart partition
+    selection based on consumer health.
+    """
+
+    def __init__(
+        self,
+        config: ProducerConfig,
+        health_manager: "HealthManager",
+        kafka_config: Dict[str, Any],
+    ) -> None:
+        """
+        Initialize the synchronous smart producer.
+
+        Args:
+            config: Producer configuration
+            health_manager: Health manager for partition selection
+            kafka_config: Kafka producer configuration
+        """
+        super().__init__(config, health_manager, kafka_config)
+        self._producer = ConfluentProducer(kafka_config)
+        self._closed = False
+
+    def produce(
+        self,
+        topic: str,
+        value: Optional[bytes] = None,
+        key: Optional[bytes] = None,
+        partition: Optional[int] = None,
+        on_delivery: Optional[Callable[[ProduceResult], None]] = None,
+        timestamp: Optional[int] = None,
+        headers: Optional[Dict[str, bytes]] = None,
+    ) -> ProduceResult:
+        """
+        Produce a message to Kafka with smart partition selection.
+
+        Args:
+            topic: Topic name
+            value: Message value
+            key: Message key
+            partition: Explicit partition (bypasses smart selection)
+            on_delivery: Delivery callback
+            timestamp: Message timestamp
+            headers: Message headers
+
+        Returns:
+            ProduceResult with metadata and delivery status
+
+        Raises:
+            ProducerNotReadyError: If producer is closed
+            PartitionSelectionError: If partition selection fails
+        """
+        if self._closed:
+            raise ProducerNotReadyError("Producer is closed")
+
+        start_time = time.time()
+
+        # Use explicit partition or smart selection
+        if partition is None:
+            try:
+                partition = self.select_partition(topic, key, value)
+            except Exception as e:
+                error_msg = f"Failed to select partition for topic {topic}: {e}"
+                logger.error(error_msg)
+                raise PartitionSelectionError(error_msg) from e
+
+        # Create message metadata
+        metadata = MessageMetadata(
+            topic=topic,
+            partition=partition,
+            timestamp=timestamp,
+            key=key,
+        )
+
+        # Use thread-safe result container and event for synchronous behavior
+        result_container: List[ProduceResult] = []
+        delivery_event = threading.Event()
+
+        def delivery_callback(err: Optional[KafkaError], msg: Any) -> None:
+            """Internal delivery callback."""
+            end_time = time.time()
+            latency_ms = (end_time - start_time) * 1000
+
+            produce_result = ProduceResult(
+                metadata=metadata,
+                success=False,
+                latency_ms=latency_ms,
+            )
+
+            if err:
+                produce_result.error = KafkaException(err)
+                logger.error(f"Message delivery failed: {err}")
+            else:
+                produce_result.success = True
+                produce_result.metadata.offset = msg.offset()
+                produce_result.metadata.timestamp = msg.timestamp()[1]
+
+            result_container.append(produce_result)
+
+            # Call user callback if provided
+            if on_delivery:
+                try:
+                    on_delivery(produce_result)
+                except Exception as e:
+                    logger.error(f"User delivery callback failed: {e}")
+
+            delivery_event.set()
+
+        try:
+            # Produce message
+            self._producer.produce(
+                topic=topic,
+                value=value,
+                key=key,
+                partition=partition,
+                timestamp=timestamp,
+                headers=headers,
+                callback=delivery_callback,
+            )
+
+            # Flush to ensure message is sent and callback is triggered
+            remaining = self._producer.flush(10.0)  # 10 second timeout
+
+            if remaining > 0:
+                # Flush timed out
+                logger.error(f"Flush timed out: {remaining} messages remain in queue")
+                return ProduceResult(
+                    metadata=metadata,
+                    success=False,
+                    error=Exception("Flush timeout"),
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+            # Wait for delivery callback to complete
+            if not delivery_event.wait(timeout=1.0):
+                logger.error("Delivery confirmation timed out after flush")
+                return ProduceResult(
+                    metadata=metadata,
+                    success=False,
+                    error=Exception("Delivery confirmation timeout"),
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+            return result_container[0]
+
+        except Exception as e:
+            error_msg = f"Failed to produce message to {topic}:{partition}: {e}"
+            logger.error(error_msg)
+            return ProduceResult(
+                metadata=metadata,
+                success=False,
+                error=e,
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+    def flush(self, timeout: Optional[float] = None) -> None:
+        """
+        Flush pending messages.
+
+        Args:
+            timeout: Timeout in seconds (None for indefinite)
+        """
+        if self._closed:
+            logger.warning("Attempted to flush closed producer")
+            return
+
+        try:
+            remaining_msgs = self._producer.flush(timeout)
+            if remaining_msgs > 0:
+                logger.warning(f"Flush timeout: {remaining_msgs} messages remain")
+        except Exception as e:
+            logger.error(f"Flush failed: {e}")
+            raise
+
+    def close(self) -> None:
+        """Close the producer and cleanup resources."""
+        if self._closed:
+            return
+
+        try:
+            # Flush pending messages
+            self.flush(timeout=10.0)
+
+            # Close underlying producer
+            self._producer = None
+            self._closed = True
+
+            logger.info("Producer closed successfully")
+
+        except Exception as e:
+            logger.error(f"Error closing producer: {e}")
+            self._closed = True
+            raise
+
+    def _refresh_topic_metadata(self, topic: str) -> None:
+        """Refresh topic metadata from Kafka."""
+        if self._closed:
+            return
+
+        try:
+            # Get topic metadata from Kafka
+            metadata = self._producer.list_topics(topic, timeout=5.0)
+
+            if topic in metadata.topics:
+                topic_metadata = metadata.topics[topic]
+                partition_count = len(topic_metadata.partitions)
+                self._partition_counts[topic] = partition_count
+                logger.debug(
+                    f"Refreshed metadata for {topic}: {partition_count} partitions"
+                )
+            else:
+                logger.warning(f"Topic {topic} not found in metadata")
+
+        except Exception as e:
+            logger.error(f"Failed to refresh metadata for {topic}: {e}")
+            raise MetadataRefreshError(f"Failed to refresh metadata for {topic}") from e
+
+    @property
+    def closed(self) -> bool:
+        """Check if producer is closed."""
+        return self._closed
 
 
 # Exception classes specific to producer operations
