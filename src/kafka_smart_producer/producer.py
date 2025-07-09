@@ -5,6 +5,7 @@ This module provides the foundation for both synchronous and asynchronous
 smart producers with intelligent partition selection and key caching.
 """
 
+import asyncio
 import hashlib
 import logging
 import random
@@ -13,12 +14,24 @@ import time
 from abc import abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol, Set
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Set,
+    Union,
+)
 
 from cachetools import TTLCache
-from confluent_kafka import KafkaError, KafkaException
-from confluent_kafka import (
-    Producer as ConfluentProducer,  # type: ignore[import-untyped]
+from confluent_kafka import (  # type: ignore[import-untyped]
+    KafkaError,
+    KafkaException,
+    Producer as ConfluentProducer,
 )
 
 from .exceptions import PartitionSelectionError
@@ -499,10 +512,11 @@ class DefaultSmartProducerBase:
             # Health check failed, assume healthy to avoid blocking
             return True
 
-    def _refresh_topic_metadata(self, topic: str) -> None:
+    def _refresh_topic_metadata(self, topic: str) -> Union[None, Awaitable[None]]:
         """Refresh topic metadata (partition count). Override in subclasses."""
         # Default implementation - subclasses should override with actual Kafka calls
         self._partition_counts[topic] = self._partition_counts.get(topic, 3)
+        return None
 
     def _record_metrics(
         self, partition: int, selection_time_ms: float, was_smart: bool, cache_hit: bool
@@ -729,6 +743,245 @@ class SyncSmartProducer(DefaultSmartProducerBase):
                 topic_metadata = metadata.topics[topic]
                 partition_count = len(topic_metadata.partitions)
                 self._partition_counts[topic] = partition_count
+                logger.debug(
+                    f"Refreshed metadata for {topic}: {partition_count} partitions"
+                )
+            else:
+                logger.warning(f"Topic {topic} not found in metadata")
+
+        except Exception as e:
+            logger.error(f"Failed to refresh metadata for {topic}: {e}")
+            raise MetadataRefreshError(f"Failed to refresh metadata for {topic}") from e
+
+    @property
+    def closed(self) -> bool:
+        """Check if producer is closed."""
+        return self._closed
+
+
+class AsyncSmartProducer(DefaultSmartProducerBase):
+    """
+    Asynchronous Kafka Smart Producer with intelligent partition selection.
+
+    This producer extends the DefaultSmartProducerBase with async/await patterns,
+    providing asynchronous message delivery with smart partition selection based
+    on consumer health. It uses asyncio for non-blocking operations while maintaining
+    the same intelligent partition selection logic.
+    """
+
+    def __init__(
+        self,
+        config: ProducerConfig,
+        health_manager: "HealthManager",
+        kafka_config: Dict[str, Any],
+    ) -> None:
+        """
+        Initialize the asynchronous smart producer.
+
+        Args:
+            config: Producer configuration
+            health_manager: Health manager for partition selection
+            kafka_config: Kafka producer configuration
+        """
+        super().__init__(config, health_manager, kafka_config)
+        self._producer = ConfluentProducer(kafka_config)
+        self._closed = False
+        self._loop = asyncio.get_event_loop()
+
+    async def produce(
+        self,
+        topic: str,
+        value: Optional[bytes] = None,
+        key: Optional[bytes] = None,
+        partition: Optional[int] = None,
+        on_delivery: Optional[Callable[[ProduceResult], None]] = None,
+        timestamp: Optional[int] = None,
+        headers: Optional[Dict[str, bytes]] = None,
+    ) -> ProduceResult:
+        """
+        Produce a message to Kafka with smart partition selection asynchronously.
+
+        Args:
+            topic: Topic name
+            value: Message value
+            key: Message key
+            partition: Explicit partition (bypasses smart selection)
+            on_delivery: Delivery callback
+            timestamp: Message timestamp
+            headers: Message headers
+
+        Returns:
+            ProduceResult with metadata and delivery status
+
+        Raises:
+            ProducerNotReadyError: If producer is closed
+            PartitionSelectionError: If partition selection fails
+        """
+        if self._closed:
+            raise ProducerNotReadyError("Producer is closed")
+
+        start_time = time.time()
+
+        # Use explicit partition or smart selection
+        if partition is None:
+            try:
+                partition = self.select_partition(topic, key, value)
+            except Exception as e:
+                error_msg = f"Failed to select partition for topic {topic}: {e}"
+                logger.error(error_msg)
+                raise PartitionSelectionError(error_msg) from e
+
+        # Create message metadata
+        metadata = MessageMetadata(
+            topic=topic,
+            partition=partition,
+            timestamp=timestamp,
+            key=key,
+        )
+
+        # Use asyncio Event for async coordination
+        result_container: List[ProduceResult] = []
+        delivery_event = asyncio.Event()
+
+        def delivery_callback(err: Optional[KafkaError], msg: Any) -> None:
+            """Internal delivery callback."""
+            end_time = time.time()
+            latency_ms = (end_time - start_time) * 1000
+
+            produce_result = ProduceResult(
+                metadata=metadata,
+                success=False,
+                latency_ms=latency_ms,
+            )
+
+            if err:
+                produce_result.error = KafkaException(err)
+                logger.error(f"Message delivery failed: {err}")
+            else:
+                produce_result.success = True
+                produce_result.metadata.offset = msg.offset()
+                produce_result.metadata.timestamp = msg.timestamp()[1]
+
+            result_container.append(produce_result)
+
+            # Call user callback if provided
+            if on_delivery:
+                try:
+                    on_delivery(produce_result)
+                except Exception as e:
+                    logger.error(f"User delivery callback failed: {e}")
+
+            # Signal completion using asyncio event
+            self._loop.call_soon_threadsafe(delivery_event.set)
+
+        try:
+            # Produce message (this is synchronous with confluent-kafka)
+            await self._loop.run_in_executor(
+                None,
+                self._producer.produce,
+                topic,
+                value,
+                key,
+                partition,
+                delivery_callback,
+                timestamp,
+                headers,
+            )
+
+            # Poll for delivery in background thread
+            await self._loop.run_in_executor(None, self._producer.poll, 0)
+
+            # Wait for delivery callback asynchronously
+            try:
+                await asyncio.wait_for(delivery_event.wait(), timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.error("Delivery confirmation timed out")
+                return ProduceResult(
+                    metadata=metadata,
+                    success=False,
+                    error=Exception("Delivery confirmation timeout"),
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+            return result_container[0]
+
+        except Exception as e:
+            error_msg = f"Failed to produce message to {topic}:{partition}: {e}"
+            logger.error(error_msg)
+            return ProduceResult(
+                metadata=metadata,
+                success=False,
+                error=e,
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+    async def flush(self, timeout: Optional[float] = None) -> None:
+        """
+        Flush pending messages asynchronously.
+
+        Args:
+            timeout: Timeout in seconds (None for indefinite)
+        """
+        if self._closed:
+            logger.warning("Attempted to flush closed producer")
+            return
+
+        try:
+            remaining_msgs = await self._loop.run_in_executor(
+                None, self._producer.flush, timeout
+            )
+            if remaining_msgs > 0:
+                logger.warning(f"Flush timeout: {remaining_msgs} messages remain")
+        except Exception as e:
+            logger.error(f"Flush failed: {e}")
+            raise
+
+    async def close(self) -> None:
+        """Close the producer and cleanup resources asynchronously."""
+        if self._closed:
+            return
+
+        try:
+            # Flush pending messages
+            await self.flush(timeout=10.0)
+
+            # Close underlying producer
+            self._producer = None
+            self._closed = True
+
+            logger.info("Async producer closed successfully")
+
+        except Exception as e:
+            logger.error(f"Error closing async producer: {e}")
+            self._closed = True
+            raise
+
+    def get_topic_metadata(self, topic: str) -> Dict[str, Any]:
+        """Get cached topic metadata (async version doesn't auto-refresh)."""
+        # For async producer, we rely on cached metadata to avoid sync/async mixing
+        # Users should call refresh_topic_metadata explicitly if needed
+        partition_count = self._partition_counts.get(topic, 1)
+        return {
+            "partition_count": partition_count,
+            "last_refresh": self._last_metadata_refresh.get(topic, 0),
+        }
+
+    async def _refresh_topic_metadata(self, topic: str) -> None:
+        """Refresh topic metadata from Kafka asynchronously."""
+        if self._closed:
+            return
+
+        try:
+            # Get topic metadata from Kafka
+            metadata = await self._loop.run_in_executor(
+                None, self._producer.list_topics, topic, 5.0
+            )
+
+            if topic in metadata.topics:
+                topic_metadata = metadata.topics[topic]
+                partition_count = len(topic_metadata.partitions)
+                self._partition_counts[topic] = partition_count
+                self._last_metadata_refresh[topic] = time.time()
                 logger.debug(
                     f"Refreshed metadata for {topic}: {partition_count} partitions"
                 )

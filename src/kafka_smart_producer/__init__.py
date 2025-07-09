@@ -49,7 +49,7 @@ from .health import (
 )
 
 # Main producer classes
-from .producer import SyncSmartProducer
+from .producer import AsyncSmartProducer, SyncSmartProducer
 from .protocols import CacheBackend, HotPartitionCalculator, LagDataCollector
 
 # Threading utilities
@@ -106,8 +106,8 @@ __all__ = [
     "NoHealthyPartitionsError",
     # Producer classes
     "SyncSmartProducer",
+    "AsyncSmartProducer",
     # Future components
-    # "AsyncSmartProducer",
     # "KafkaAdminLagCollector",
     # "ThresholdHotPartitionCalculator",
 ]
