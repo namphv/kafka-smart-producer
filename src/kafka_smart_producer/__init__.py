@@ -19,10 +19,11 @@ from .caching import (
     CacheTimeoutError,
     CacheUnavailableError,
     DefaultHybridCache,
-    DefaultL1Cache,
+    DefaultLocalCache,
+    DefaultRemoteCache,
     HybridCache,
-    L1Cache,
-    L2Cache,
+    LocalCache,
+    RemoteCache,
 )
 
 # Core protocol interfaces
@@ -49,13 +50,12 @@ from .health import (
 )
 
 # Main producer classes
-from .producer import AsyncSmartProducer, SyncSmartProducer
+from .producer import AsyncSmartProducer, SmartProducer
 from .protocols import CacheBackend, HotPartitionCalculator, LagDataCollector
 
 # Threading utilities
 from .threading import (
     SimpleBackgroundRefresh,
-    ThreadSafeCache,
     create_async_background_task,
     create_sync_background_refresh,
     run_periodic_async,
@@ -79,10 +79,11 @@ __all__ = [
     "PartitionSelectionError",
     "ConfigurationError",
     # Caching system
-    "L1Cache",
-    "L2Cache",
+    "LocalCache",
+    "RemoteCache",
     "HybridCache",
-    "DefaultL1Cache",
+    "DefaultLocalCache",
+    "DefaultRemoteCache",
     "DefaultHybridCache",
     "CacheConfig",
     "CacheEntry",
@@ -91,7 +92,6 @@ __all__ = [
     "CacheTimeoutError",
     "CacheUnavailableError",
     # Threading utilities
-    "ThreadSafeCache",
     "SimpleBackgroundRefresh",
     "run_periodic_async",
     "create_async_background_task",
@@ -105,7 +105,7 @@ __all__ = [
     "PartitionSelectionStrategy",
     "NoHealthyPartitionsError",
     # Producer classes
-    "SyncSmartProducer",
+    "SmartProducer",
     "AsyncSmartProducer",
     # Future components
     # "KafkaAdminLagCollector",

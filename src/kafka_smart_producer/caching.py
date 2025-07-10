@@ -1,12 +1,13 @@
 """
 Hybrid caching system for Kafka Smart Producer.
 
-This module provides L1 (local) and L2 (distributed) cache implementations
+This module provides local and remote cache implementations
 with read-through patterns for partition health data caching.
 """
 
 import fnmatch
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -46,8 +47,8 @@ class _LRUNode:
 class CacheLevel(Enum):
     """Cache levels in the hierarchy."""
 
-    L1_LOCAL = "l1_local"
-    L2_DISTRIBUTED = "l2_distributed"
+    LOCAL = "local"
+    REMOTE = "remote"
 
 
 class CacheStats:
@@ -55,8 +56,8 @@ class CacheStats:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self.hits_l1 = 0
-        self.hits_l2 = 0
+        self.hits_local = 0
+        self.hits_remote = 0
         self.misses = 0
         self.sets = 0
         self.deletes = 0
@@ -65,14 +66,14 @@ class CacheStats:
         self.total_latency_ms = 0.0
         self.last_reset = time.time()
 
-    def hit_l1(self, latency_ms: float) -> None:
+    def hit_local(self, latency_ms: float) -> None:
         with self._lock:
-            self.hits_l1 += 1
+            self.hits_local += 1
             self.total_latency_ms += latency_ms
 
-    def hit_l2(self, latency_ms: float) -> None:
+    def hit_remote(self, latency_ms: float) -> None:
         with self._lock:
-            self.hits_l2 += 1
+            self.hits_remote += 1
             self.total_latency_ms += latency_ms
 
     def miss(self, latency_ms: float) -> None:
@@ -98,14 +99,14 @@ class CacheStats:
 
     def get_hit_ratio(self) -> float:
         with self._lock:
-            total_ops = self.hits_l1 + self.hits_l2 + self.misses
+            total_ops = self.hits_local + self.hits_remote + self.misses
             if total_ops == 0:
                 return 0.0
-            return (self.hits_l1 + self.hits_l2) / total_ops
+            return (self.hits_local + self.hits_remote) / total_ops
 
     def get_avg_latency_ms(self) -> float:
         with self._lock:
-            total_ops = self.hits_l1 + self.hits_l2 + self.misses
+            total_ops = self.hits_local + self.hits_remote + self.misses
             if total_ops == 0:
                 return 0.0
             return self.total_latency_ms / total_ops
@@ -113,8 +114,8 @@ class CacheStats:
     def reset(self) -> None:
         """Reset all counters."""
         with self._lock:
-            self.hits_l1 = 0
-            self.hits_l2 = 0
+            self.hits_local = 0
+            self.hits_remote = 0
             self.misses = 0
             self.sets = 0
             self.deletes = 0
@@ -124,23 +125,23 @@ class CacheStats:
             self.last_reset = time.time()
 
 
-class L1Cache(Protocol):
+class LocalCache(Protocol):
     """Local in-memory cache interface (LRU with TTL)."""
 
     def get(self, key: str) -> Optional[Any]:
-        """Get value from L1 cache. Returns None if not found or expired."""
+        """Get value from local cache. Returns None if not found or expired."""
         ...
 
     def set(self, key: str, value: Any, ttl_seconds: Optional[float] = None) -> None:
-        """Set value in L1 cache with optional TTL."""
+        """Set value in local cache with optional TTL."""
         ...
 
     def delete(self, key: str) -> None:
-        """Delete key from L1 cache."""
+        """Delete key from local cache."""
         ...
 
     def clear(self) -> None:
-        """Clear all entries from L1 cache."""
+        """Clear all entries from local cache."""
         ...
 
     def size(self) -> int:
@@ -152,43 +153,43 @@ class L1Cache(Protocol):
         ...
 
 
-class L2Cache(Protocol):
+class RemoteCache(Protocol):
     """Distributed cache interface (Redis-based)."""
 
     async def get(self, key: str) -> Optional[Any]:
-        """Get value from L2 cache asynchronously."""
+        """Get value from remote cache asynchronously."""
         ...
 
     def get_sync(self, key: str) -> Optional[Any]:
-        """Get value from L2 cache synchronously."""
+        """Get value from remote cache synchronously."""
         ...
 
     async def set(
         self, key: str, value: Any, ttl_seconds: Optional[float] = None
     ) -> None:
-        """Set value in L2 cache with optional TTL."""
+        """Set value in remote cache with optional TTL."""
         ...
 
     def set_sync(
         self, key: str, value: Any, ttl_seconds: Optional[float] = None
     ) -> None:
-        """Set value in L2 cache synchronously."""
+        """Set value in remote cache synchronously."""
         ...
 
     async def delete(self, key: str) -> None:
-        """Delete key from L2 cache."""
+        """Delete key from remote cache."""
         ...
 
     def delete_sync(self, key: str) -> None:
-        """Delete key from L2 cache synchronously."""
+        """Delete key from remote cache synchronously."""
         ...
 
     async def ping(self) -> bool:
-        """Check if L2 cache is available."""
+        """Check if remote cache is available."""
         ...
 
     def ping_sync(self) -> bool:
-        """Check if L2 cache is available synchronously."""
+        """Check if remote cache is available synchronously."""
         ...
 
     def get_stats(self) -> CacheStats:
@@ -197,12 +198,12 @@ class L2Cache(Protocol):
 
 
 class HybridCache(Protocol):
-    """Combined L1 + L2 cache with read-through pattern."""
+    """Combined local + remote cache with read-through pattern."""
 
     async def get(self, key: str) -> Optional[Any]:
         """
-        Get value using read-through pattern: L1 -> L2 -> None.
-        Updates L1 on L2 hit.
+        Get value using read-through pattern: local -> remote -> None.
+        Updates local on remote hit.
         """
         ...
 
@@ -213,7 +214,7 @@ class HybridCache(Protocol):
     async def set(
         self, key: str, value: Any, ttl_seconds: Optional[float] = None
     ) -> None:
-        """Set value in both L1 and L2 caches."""
+        """Set value in both local and remote caches."""
         ...
 
     def set_sync(
@@ -223,7 +224,7 @@ class HybridCache(Protocol):
         ...
 
     async def delete(self, key: str) -> None:
-        """Delete key from both L1 and L2 caches."""
+        """Delete key from both local and remote caches."""
         ...
 
     def delete_sync(self, key: str) -> None:
@@ -238,8 +239,8 @@ class HybridCache(Protocol):
         """Get statistics for both cache levels."""
         ...
 
-    def is_l2_available(self) -> bool:
-        """Check if L2 cache is currently available."""
+    def is_remote_available(self) -> bool:
+        """Check if remote cache is currently available."""
         ...
 
 
@@ -247,28 +248,42 @@ class HybridCache(Protocol):
 class CacheConfig:
     """Configuration for cache behavior."""
 
-    # L1 Cache settings
-    l1_max_size: int = 1000
-    l1_default_ttl_seconds: float = 300.0  # 5 minutes
+    # Message-type specific TTLs
+    ordered_message_ttl: float = (
+        3600.0  # 1 hour for consistency (only for ordered messages)
+    )
 
-    # L2 Cache settings
-    l2_enabled: bool = True
-    l2_default_ttl_seconds: float = 900.0  # 15 minutes
+    # Local cache settings
+    local_max_size: int = 1000
+    local_default_ttl_seconds: float = 300.0
+
+    # Remote cache settings
+    remote_enabled: bool = True
+    remote_default_ttl_seconds: float = 900.0
+
+    # Redis security settings (optional)
+    redis_ssl_enabled: bool = False
+    redis_ssl_cert_reqs: str = "required"
+    redis_ssl_ca_certs: Optional[str] = None
+    redis_ssl_certfile: Optional[str] = None
+    redis_ssl_keyfile: Optional[str] = None
 
     # Monitoring
     stats_collection_enabled: bool = True
 
     def __post_init__(self) -> None:
         """Validate configuration parameters."""
-        if self.l1_max_size <= 0:
-            raise ValueError("l1_max_size must be positive")
-        if self.l1_default_ttl_seconds <= 0:
-            raise ValueError("l1_default_ttl_seconds must be positive")
-        if self.l2_default_ttl_seconds <= 0:
-            raise ValueError("l2_default_ttl_seconds must be positive")
+        if self.local_max_size <= 0:
+            raise ValueError("local_max_size must be positive")
+        if self.local_default_ttl_seconds <= 0:
+            raise ValueError("local_default_ttl_seconds must be positive")
+        if self.remote_default_ttl_seconds <= 0:
+            raise ValueError("remote_default_ttl_seconds must be positive")
+        if self.ordered_message_ttl <= 0:
+            raise ValueError("ordered_message_ttl must be positive")
 
 
-class DefaultL1Cache:
+class DefaultLocalCache:
     """O(1) LRU cache implementation with TTL support using doubly-linked list."""
 
     def __init__(self, config: CacheConfig):
@@ -307,11 +322,11 @@ class DefaultL1Cache:
 
             latency_ms = (time.time() - start_time) * 1000
             if self._config.stats_collection_enabled:
-                self._stats.hit_l1(latency_ms)
+                self._stats.hit_local(latency_ms)
             return node.entry.value
 
     def set(self, key: str, value: Any, ttl_seconds: Optional[float] = None) -> None:
-        ttl = ttl_seconds or self._config.l1_default_ttl_seconds
+        ttl = ttl_seconds or self._config.local_default_ttl_seconds
 
         with self._lock:
             existing_node = self._data.get(key)
@@ -327,7 +342,7 @@ class DefaultL1Cache:
                 self._add_to_head(new_node)
 
                 # Evict if over capacity
-                if len(self._data) > self._config.l1_max_size:
+                if len(self._data) > self._config.local_max_size:
                     self._evict_tail()
 
             if self._config.stats_collection_enabled:
@@ -405,172 +420,411 @@ class DefaultL1Cache:
 
 
 class DefaultHybridCache:
-    """Default implementation of HybridCache."""
+    """Enhanced hybrid cache with local and remote cache support."""
 
     def __init__(
         self,
-        l1_cache: L1Cache,
-        l2_cache: Optional[L2Cache],
+        local_cache: LocalCache,
+        remote_cache: Optional[RemoteCache],
         config: CacheConfig,
     ):
-        self._l1 = l1_cache
-        self._l2 = l2_cache
+        self._local = local_cache
+        self._remote = remote_cache
         self._config = config
-        self._l2_available = True
-        self._last_l2_check = 0.0
+        self._remote_available = True
+        self._last_remote_check = 0.0
 
     async def get(self, key: str) -> Optional[Any]:
-        """Read-through cache lookup: L1 -> L2 -> None."""
-        # Try L1 first
-        value = self._l1.get(key)
+        """Read-through cache lookup: local -> remote -> None."""
+        # Try local first
+        value = self._local.get(key)
         if value is not None:
             return value
 
-        # Try L2 if available
-        if self._is_l2_enabled() and self._l2 is not None:
+        # Try remote if available
+        if self._is_remote_enabled() and self._remote is not None:
             try:
-                value = await self._l2.get(key)
+                value = await self._remote.get(key)
                 if value is not None:
-                    # Promote to L1
-                    self._l1.set(key, value, self._config.l1_default_ttl_seconds)
+                    # Promote to local
+                    self._local.set(key, value, self._config.local_default_ttl_seconds)
                     return value
             except Exception:
-                self._mark_l2_unavailable()
+                self._mark_remote_unavailable()
                 # Continue to return None
 
         return None
 
     def get_sync(self, key: str) -> Optional[Any]:
         """Synchronous version of get()."""
-        # Try L1 first
-        value = self._l1.get(key)
+        # Try local first
+        value = self._local.get(key)
         if value is not None:
             return value
 
-        # Try L2 if available
-        if self._is_l2_enabled() and self._l2 is not None:
+        # Try remote if available
+        if self._is_remote_enabled() and self._remote is not None:
             try:
-                value = self._l2.get_sync(key)
+                value = self._remote.get_sync(key)
                 if value is not None:
-                    # Promote to L1
-                    self._l1.set(key, value, self._config.l1_default_ttl_seconds)
+                    # Promote to local
+                    self._local.set(key, value, self._config.local_default_ttl_seconds)
                     return value
             except Exception:
-                self._mark_l2_unavailable()
+                self._mark_remote_unavailable()
 
         return None
+
+    def set_with_ordered_ttl(self, key: str, value: Any) -> None:
+        """Set value with TTL for ordered messages (key stickiness)."""
+        ttl = self._config.ordered_message_ttl
+        self.set_sync(key, value, ttl)
 
     async def set(
         self, key: str, value: Any, ttl_seconds: Optional[float] = None
     ) -> None:
-        """Set in both L1 and L2."""
-        # Always set in L1
-        self._l1.set(key, value, ttl_seconds or self._config.l1_default_ttl_seconds)
+        """Set in both local and remote."""
+        # Always set in local
+        self._local.set(
+            key, value, ttl_seconds or self._config.local_default_ttl_seconds
+        )
 
-        # Set in L2 if available
-        if self._is_l2_enabled() and self._l2 is not None:
+        # Set in remote if available
+        if self._is_remote_enabled() and self._remote is not None:
             try:
-                await self._l2.set(
-                    key, value, ttl_seconds or self._config.l2_default_ttl_seconds
+                await self._remote.set(
+                    key, value, ttl_seconds or self._config.remote_default_ttl_seconds
                 )
             except Exception:
-                self._mark_l2_unavailable()
-                # L1 set still succeeded
+                self._mark_remote_unavailable()
+                # Local set still succeeded
 
     def set_sync(
         self, key: str, value: Any, ttl_seconds: Optional[float] = None
     ) -> None:
         """Synchronous version of set()."""
-        # Always set in L1
-        self._l1.set(key, value, ttl_seconds or self._config.l1_default_ttl_seconds)
+        # Always set in local
+        self._local.set(
+            key, value, ttl_seconds or self._config.local_default_ttl_seconds
+        )
 
-        # Set in L2 if available
-        if self._is_l2_enabled() and self._l2 is not None:
+        # Set in remote if available
+        if self._is_remote_enabled() and self._remote is not None:
             try:
-                self._l2.set_sync(
-                    key, value, ttl_seconds or self._config.l2_default_ttl_seconds
+                self._remote.set_sync(
+                    key, value, ttl_seconds or self._config.remote_default_ttl_seconds
                 )
             except Exception:
-                self._mark_l2_unavailable()
+                self._mark_remote_unavailable()
 
     async def delete(self, key: str) -> None:
         """Delete from both caches."""
-        self._l1.delete(key)
+        self._local.delete(key)
 
-        if self._is_l2_enabled() and self._l2 is not None:
+        if self._is_remote_enabled() and self._remote is not None:
             try:
-                await self._l2.delete(key)
+                await self._remote.delete(key)
             except Exception:
-                self._mark_l2_unavailable()
+                self._mark_remote_unavailable()
 
     def delete_sync(self, key: str) -> None:
         """Synchronous version of delete()."""
-        self._l1.delete(key)
+        self._local.delete(key)
 
-        if self._is_l2_enabled() and self._l2 is not None:
+        if self._is_remote_enabled() and self._remote is not None:
             try:
-                self._l2.delete_sync(key)
+                self._remote.delete_sync(key)
             except Exception:
-                self._mark_l2_unavailable()
+                self._mark_remote_unavailable()
 
-    def invalidate_pattern(self, pattern: str) -> None:
-        """Invalidate entries matching pattern (L1 only for now)."""
-        # Use proper L1 cache interface
-        if hasattr(self._l1, "invalidate_pattern"):
-            self._l1.invalidate_pattern(pattern)
-        else:
-            # Fallback for caches without pattern support
-            # This is still expensive but properly encapsulated
-            if hasattr(self._l1, "_data") and hasattr(self._l1, "_lock"):
-                with self._l1._lock:
-                    keys_to_delete = [
-                        key
-                        for key in self._l1._data.keys()
-                        if fnmatch.fnmatch(key, pattern)
-                    ]
-                    for key in keys_to_delete:
-                        self._l1.delete(key)
+    def clear_pattern(self, pattern: str) -> None:
+        """Safely clear cache entries matching pattern."""
+        # Clear from local cache
+        if hasattr(self._local, "invalidate_pattern"):
+            self._local.invalidate_pattern(pattern)
+
+        # Clear from remote cache safely
+        if self._is_remote_enabled() and self._remote is not None:
+            try:
+                self._remote.delete_sync(pattern)
+            except Exception as e:
+                logger.warning(f"Failed to clear remote cache pattern {pattern}: {e}")
+
+    def clear(self) -> None:
+        """Clear both local and remote caches safely."""
+        # Clear local cache
+        self._local.clear()
+
+        # Clear remote cache with app-specific pattern
+        if self._is_remote_enabled() and self._remote is not None:
+            try:
+                # Use app-specific prefix to avoid clearing other apps' data
+                app_pattern = "kafka_smart_producer:*"
+                self._remote.delete_sync(app_pattern)
+            except Exception as e:
+                logger.warning(f"Failed to clear remote cache: {e}")
 
     def get_combined_stats(self) -> Dict[str, CacheStats]:
         """Get statistics from both cache levels."""
-        stats = {"l1": self._l1.get_stats()}
-        if self._l2:
-            stats["l2"] = self._l2.get_stats()
+        stats = {"local": self._local.get_stats()}
+        if self._remote:
+            stats["remote"] = self._remote.get_stats()
         return stats
 
-    def is_l2_available(self) -> bool:
-        """Check current L2 availability."""
-        return self._l2_available and self._l2 is not None
+    def is_remote_available(self) -> bool:
+        """Check current remote availability."""
+        return self._remote_available and self._remote is not None
 
-    def _is_l2_enabled(self) -> bool:
-        """Check if L2 should be used."""
-        if not self._config.l2_enabled or self._l2 is None:
+    def _is_remote_enabled(self) -> bool:
+        """Check if remote should be used."""
+        if not self._config.remote_enabled or self._remote is None:
             return False
 
-        # Periodically check L2 health if marked unavailable
+        # Periodically check remote health if marked unavailable
         now = time.time()
-        if not self._l2_available and (now - self._last_l2_check) > 30.0:
-            self._check_l2_health()
+        if not self._remote_available and (now - self._last_remote_check) > 30.0:
+            self._check_remote_health()
 
-        return self._l2_available
+        return self._remote_available
 
-    def _mark_l2_unavailable(self) -> None:
-        """Mark L2 as unavailable due to error."""
-        self._l2_available = False
-        self._last_l2_check = time.time()
+    def _mark_remote_unavailable(self) -> None:
+        """Mark remote as unavailable due to error."""
+        self._remote_available = False
+        self._last_remote_check = time.time()
 
-    def _check_l2_health(self) -> None:
-        """Check if L2 has recovered."""
+    def _check_remote_health(self) -> None:
+        """Check if remote has recovered."""
         try:
-            if self._l2 is not None and self._l2.ping_sync():
-                self._l2_available = True
+            if self._remote is not None and self._remote.ping_sync():
+                self._remote_available = True
         except Exception as e:
-            logger.debug(f"L2 health check failed: {e}")  # Remain unavailable
+            logger.debug(f"Remote health check failed: {e}")  # Remain unavailable
 
-        self._last_l2_check = time.time()
+        self._last_remote_check = time.time()
 
 
-# Cache-specific exception classes
+class DefaultRemoteCache:
+    """Redis-based remote cache implementation with optional security features."""
+
+    def __init__(self, redis_config: Dict[str, Any]):
+        self._redis_config = redis_config
+        self._redis = None
+        self._stats = CacheStats()
+
+        # Try to initialize Redis connection
+        try:
+            import redis
+
+            # Build basic connection config
+            connection_config = {
+                "host": redis_config.get("host", "localhost"),
+                "port": redis_config.get("port", 6379),
+                "db": redis_config.get("db", 0),
+                "decode_responses": True,
+                "socket_connect_timeout": 2.0,
+                "socket_timeout": 2.0,
+            }
+
+            # Add password if provided (from config or environment)
+            password = redis_config.get("password") or os.getenv("REDIS_PASSWORD")
+            if password:
+                connection_config["password"] = password
+
+            # Add SSL/TLS configuration if enabled
+            if redis_config.get("ssl_enabled", False):
+                connection_config.update(
+                    {
+                        "ssl": True,
+                        "ssl_cert_reqs": redis_config.get("ssl_cert_reqs", "required"),
+                        "ssl_ca_certs": redis_config.get("ssl_ca_certs"),
+                        "ssl_certfile": redis_config.get("ssl_certfile"),
+                        "ssl_keyfile": redis_config.get("ssl_keyfile"),
+                    }
+                )
+                logger.info("Redis SSL/TLS enabled")
+
+            self._redis = redis.Redis(**connection_config)
+            # Test connection
+            self._redis.ping()
+
+        except Exception as e:
+            logger.warning(f"Redis connection failed: {e}")
+            self._redis = None
+
+    async def get(self, key: str) -> Optional[Any]:
+        """Get value from Redis with optimized deserialization."""
+        if not self._redis:
+            return None
+
+        try:
+            start_time = time.time()
+            value = self._redis.get(key)
+            latency_ms = (time.time() - start_time) * 1000
+
+            if value is not None:
+                self._stats.hit_remote(latency_ms)
+
+                # Optimize for integer partition IDs
+                if value.startswith("json:"):
+                    import json
+
+                    return json.loads(value[5:])
+                else:
+                    try:
+                        return int(value)
+                    except ValueError:
+                        return value
+            else:
+                self._stats.miss(latency_ms)
+                return None
+        except Exception:
+            self._stats.error()
+            return None
+
+    def get_sync(self, key: str) -> Optional[Any]:
+        """Get value from Redis with optimized deserialization."""
+        if not self._redis:
+            return None
+
+        try:
+            start_time = time.time()
+            value = self._redis.get(key)
+            latency_ms = (time.time() - start_time) * 1000
+
+            if value is not None:
+                self._stats.hit_remote(latency_ms)
+
+                # Optimize for integer partition IDs
+                if value.startswith("json:"):
+                    import json
+
+                    return json.loads(value[5:])
+                else:
+                    try:
+                        return int(value)
+                    except ValueError:
+                        return value
+            else:
+                self._stats.miss(latency_ms)
+                return None
+        except Exception:
+            self._stats.error()
+            return None
+
+    async def set(
+        self, key: str, value: Any, ttl_seconds: Optional[float] = None
+    ) -> None:
+        """Set value in Redis with optimized serialization."""
+        if not self._redis:
+            return
+
+        try:
+            # Optimize for integer partition IDs (most common case)
+            if isinstance(value, int):
+                serialized_value = str(value)
+            elif isinstance(value, (str, float)):
+                serialized_value = str(value)
+            else:
+                # Fallback to JSON for complex types
+                import json
+
+                serialized_value = f"json:{json.dumps(value)}"
+
+            if ttl_seconds:
+                self._redis.setex(key, int(ttl_seconds), serialized_value)
+            else:
+                self._redis.set(key, serialized_value)
+
+            self._stats.set_operation()
+        except Exception:
+            self._stats.error()
+
+    def set_sync(
+        self, key: str, value: Any, ttl_seconds: Optional[float] = None
+    ) -> None:
+        """Set value in Redis with optimized serialization."""
+        if not self._redis:
+            return
+
+        try:
+            # Optimize for integer partition IDs (most common case)
+            if isinstance(value, int):
+                serialized_value = str(value)
+            elif isinstance(value, (str, float)):
+                serialized_value = str(value)
+            else:
+                # Fallback to JSON for complex types
+                import json
+
+                serialized_value = f"json:{json.dumps(value)}"
+
+            if ttl_seconds:
+                self._redis.setex(key, int(ttl_seconds), serialized_value)
+            else:
+                self._redis.set(key, serialized_value)
+
+            self._stats.set_operation()
+        except Exception:
+            self._stats.error()
+
+    async def delete(self, key: str) -> None:
+        """Delete key from Redis asynchronously."""
+        if not self._redis:
+            return
+
+        try:
+            self._redis.delete(key)
+            self._stats.delete_operation()
+        except Exception:
+            self._stats.error()
+
+    def delete_sync(self, key: str) -> None:
+        """Delete key or pattern from Redis safely."""
+        if not self._redis:
+            return
+
+        try:
+            if "*" in key or "?" in key:
+                # Use SCAN for safe pattern-based deletion
+                deleted_count = 0
+                for k in self._redis.scan_iter(match=key, count=100):
+                    self._redis.delete(k)
+                    deleted_count += 1
+                logger.debug(f"Deleted {deleted_count} keys matching pattern: {key}")
+            else:
+                self._redis.delete(key)
+
+            self._stats.delete_operation()
+        except Exception:
+            self._stats.error()
+
+    async def ping(self) -> bool:
+        """Check if Redis is available asynchronously."""
+        if not self._redis:
+            return False
+
+        try:
+            self._redis.ping()
+            return True
+        except Exception:
+            return False
+
+    def ping_sync(self) -> bool:
+        """Check if Redis is available synchronously."""
+        if not self._redis:
+            return False
+
+        try:
+            self._redis.ping()
+            return True
+        except Exception:
+            return False
+
+    def get_stats(self) -> CacheStats:
+        """Get cache performance statistics."""
+        return self._stats
+
+
 class CacheUnavailableError(CacheError):
     """Raised when cache backend is unavailable."""
 

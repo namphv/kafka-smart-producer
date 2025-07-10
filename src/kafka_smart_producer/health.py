@@ -6,7 +6,6 @@ collection, health score calculation, and intelligent partition selection.
 """
 
 import asyncio
-import hashlib
 import logging
 import random
 import threading
@@ -15,6 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Protocol, Union
 
+from .caching import CacheConfig, DefaultLocalCache
 from .exceptions import (
     HealthCalculationError,
     HealthManagerError,
@@ -24,7 +24,6 @@ from .exceptions import (
 from .protocols import CacheBackend, HotPartitionCalculator, LagDataCollector
 from .threading import (
     SimpleBackgroundRefresh,
-    ThreadSafeCache,
     create_async_background_task,
     create_sync_background_refresh,
 )
@@ -93,15 +92,13 @@ class HealthManager(Protocol):
     def select_partition(
         self,
         topic: str,
-        key: Optional[bytes] = None,
         available_partitions: Optional[List[int]] = None,
     ) -> int:
         """
-        Select optimal partition for message delivery.
+        Select optimal partition for message delivery based on consumer lag.
 
         Args:
             topic: Target topic name
-            key: Message key for consistent hashing (optional)
             available_partitions: Available partition list (optional)
 
         Returns:
@@ -132,7 +129,7 @@ class DefaultHealthManager:
         self,
         lag_collector: LagDataCollector,
         health_calculator: HotPartitionCalculator,
-        cache: Optional[Union[ThreadSafeCache, CacheBackend]] = None,
+        cache: Optional[Union[DefaultLocalCache, CacheBackend]] = None,
         config: Optional[HealthManagerConfig] = None,
         explicit_async_mode: Optional[bool] = None,
     ):
@@ -144,7 +141,13 @@ class DefaultHealthManager:
 
         self._lag_collector = lag_collector
         self._health_calculator = health_calculator
-        self._cache = cache or ThreadSafeCache()
+        self._cache = cache or DefaultLocalCache(
+            CacheConfig(
+                local_max_size=1000,
+                local_default_ttl_seconds=300.0,
+                stats_collection_enabled=False,  # No stats needed
+            )
+        )
         self._config = config or HealthManagerConfig()
         self._explicit_async_mode = explicit_async_mode
 
@@ -240,7 +243,6 @@ class DefaultHealthManager:
     def select_partition(
         self,
         topic: str,
-        key: Optional[bytes] = None,
         available_partitions: Optional[List[int]] = None,
     ) -> int:
         """Select partition using configured strategy and health data."""
@@ -249,17 +251,13 @@ class DefaultHealthManager:
 
             if not topic_health:
                 # No health data available, use fallback strategy
-                return self._fallback_partition_selection(
-                    topic, key, available_partitions
-                )
+                return self._fallback_partition_selection(topic, available_partitions)
 
             healthy_partitions = topic_health.healthy_partitions.copy()
 
             if not healthy_partitions:
                 # No healthy partitions, use fallback
-                return self._fallback_partition_selection(
-                    topic, key, available_partitions
-                )
+                return self._fallback_partition_selection(topic, available_partitions)
 
             # Filter by available_partitions if provided
             if available_partitions:
@@ -268,15 +266,15 @@ class DefaultHealthManager:
                 ]
                 if not healthy_partitions:
                     return self._fallback_partition_selection(
-                        topic, key, available_partitions
+                        topic, available_partitions
                     )
 
-            # Apply selection strategy
-            return self._apply_selection_strategy(topic, healthy_partitions, key)
+            # Apply selection strategy based on consumer lag
+            return self._apply_selection_strategy(topic, healthy_partitions)
 
         except Exception as e:
             logger.warning(f"Error in partition selection for {topic}: {e}")
-            return self._fallback_partition_selection(topic, key, available_partitions)
+            return self._fallback_partition_selection(topic, available_partitions)
 
     def is_partition_healthy(self, topic: str, partition_id: int) -> bool:
         """Check if partition meets health threshold."""
@@ -440,14 +438,9 @@ class DefaultHealthManager:
             if hasattr(self._cache, "set"):
                 try:
                     cache_key = f"topic_health:{topic}"
-                    if hasattr(self._cache, "set_sync"):
-                        self._cache.set_sync(
-                            cache_key,
-                            topic_health,
-                            ttl=int(self._config.cache_ttl_seconds),
-                        )
-                    else:
-                        self._cache.set(cache_key, topic_health)
+                    self._cache.set(
+                        cache_key, topic_health, int(self._config.cache_ttl_seconds)
+                    )
                 except Exception as e:
                     logger.debug(f"Cache set failed for {topic}: {e}")
 
@@ -459,9 +452,9 @@ class DefaultHealthManager:
             raise HealthManagerError(f"Health refresh failed for {topic}") from e
 
     def _apply_selection_strategy(
-        self, topic: str, healthy_partitions: List[int], key: Optional[bytes]
+        self, topic: str, healthy_partitions: List[int]
     ) -> int:
-        """Apply configured partition selection strategy."""
+        """Apply configured partition selection strategy based on consumer lag."""
         if self._config.selection_strategy == PartitionSelectionStrategy.RANDOM:
             return random.choice(healthy_partitions)
 
@@ -498,7 +491,6 @@ class DefaultHealthManager:
     def _fallback_partition_selection(
         self,
         topic: str,
-        key: Optional[bytes],
         available_partitions: Optional[List[int]],
     ) -> int:
         """Fallback selection when no health data available."""
@@ -510,18 +502,13 @@ class DefaultHealthManager:
         if not partitions:
             raise PartitionSelectionError(f"No partitions available for topic {topic}")
 
-        if key:
-            # Use key-based hashing
-            hash_value = int(hashlib.sha256(key).hexdigest(), 16)  # noqa: S324
-            return partitions[hash_value % len(partitions)]
-        else:
-            # Use round-robin with per-topic lock
-            topic_lock = self._get_topic_lock(topic)
-            with topic_lock:
-                current = self._selection_state.get(f"fallback:{topic}", 0)
-                partition = partitions[current % len(partitions)]
-                self._selection_state[f"fallback:{topic}"] = current + 1
-                return partition
+        # Use round-robin with per-topic lock
+        topic_lock = self._get_topic_lock(topic)
+        with topic_lock:
+            current = self._selection_state.get(f"fallback:{topic}", 0)
+            partition = partitions[current % len(partitions)]
+            self._selection_state[f"fallback:{topic}"] = current + 1
+            return partition
 
     def _weighted_random_choice(self, choices: List[int], weights: List[float]) -> int:
         """Select item from choices using weights."""

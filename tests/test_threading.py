@@ -11,9 +11,9 @@ import time
 
 import pytest
 
+from kafka_smart_producer.caching import CacheConfig, DefaultLocalCache
 from kafka_smart_producer.threading import (
     SimpleBackgroundRefresh,
-    ThreadSafeCache,
     create_async_background_task,
     create_sync_background_refresh,
     run_periodic_async,
@@ -61,75 +61,6 @@ class MockAsyncRefreshCallback:
 
         if self.should_raise:
             raise Exception(f"Mock async error on call {self.call_count}")
-
-
-class TestThreadSafeCache:
-    """Test scenarios for simplified ThreadSafeCache using cachetools."""
-
-    def test_basic_cache_operations(self):
-        """Test basic cache get/set/delete operations."""
-        cache = ThreadSafeCache(max_size=10, default_ttl=300.0)
-
-        # Test set/get
-        cache.set("key1", "value1")
-        assert cache.get("key1") == "value1"
-        assert cache.size() == 1
-
-        # Test delete
-        cache.delete("key1")
-        assert cache.get("key1") is None
-        assert cache.size() == 0
-
-        # Test clear
-        cache.set("key1", "value1")
-        cache.set("key2", "value2")
-        assert cache.size() == 2
-        cache.clear()
-        assert cache.size() == 0
-
-    def test_ttl_functionality(self):
-        """Test TTL (time-to-live) functionality."""
-        cache = ThreadSafeCache(max_size=10, default_ttl=0.1)
-
-        # Set with default TTL
-        cache.set("key1", "value1")
-        assert cache.get("key1") == "value1"
-
-        # Wait for expiration
-        time.sleep(0.15)
-        assert cache.get("key1") is None
-        assert cache.size() == 0
-
-    def test_thread_safety(self):
-        """Test concurrent access from multiple threads."""
-        cache = ThreadSafeCache(max_size=1000, default_ttl=10.0)
-        num_threads = 10
-        operations_per_thread = 100
-
-        def worker(thread_id: int):
-            for i in range(operations_per_thread):
-                key = f"thread_{thread_id}_key_{i}"
-                value = f"thread_{thread_id}_value_{i}"
-
-                cache.set(key, value)
-                retrieved = cache.get(key)
-                assert retrieved == value or retrieved is None  # Might be evicted
-
-                if i % 10 == 0:
-                    cache.size()  # Test size calculation under load
-
-        threads = []
-        for i in range(num_threads):
-            thread = threading.Thread(target=worker, args=(i,))
-            threads.append(thread)
-            thread.start()
-
-        for thread in threads:
-            thread.join()
-
-        # Cache should be in consistent state
-        final_size = cache.size()
-        assert 0 <= final_size <= 1000
 
 
 class TestSimpleBackgroundRefresh:
@@ -344,7 +275,9 @@ class TestPerformanceRequirements:
 
     def test_cache_access_performance(self):
         """Test cache access time requirement (<1ms)."""
-        cache = ThreadSafeCache(max_size=1000, default_ttl=300.0)
+        cache = DefaultLocalCache(
+            CacheConfig(local_max_size=1000, local_default_ttl_seconds=300.0)
+        )
 
         # Pre-populate cache
         for i in range(100):
@@ -371,7 +304,9 @@ class TestIntegration:
     @pytest.mark.asyncio
     async def test_async_refresh_with_cache(self):
         """Test async refresh updating cache."""
-        cache = ThreadSafeCache(max_size=10, default_ttl=300.0)
+        cache = DefaultLocalCache(
+            CacheConfig(local_max_size=10, local_default_ttl_seconds=300.0)
+        )
         call_count = 0
 
         async def refresh_callback():
@@ -394,7 +329,9 @@ class TestIntegration:
 
     def test_sync_refresh_with_cache(self):
         """Test sync refresh updating cache."""
-        cache = ThreadSafeCache(max_size=10, default_ttl=300.0)
+        cache = DefaultLocalCache(
+            CacheConfig(local_max_size=10, local_default_ttl_seconds=300.0)
+        )
         call_count = 0
         lock = threading.Lock()
 

@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
+from kafka_smart_producer.caching import CacheConfig, DefaultLocalCache
 from kafka_smart_producer.exceptions import (
     HealthCalculationError,
     LagDataUnavailableError,
@@ -25,7 +26,6 @@ from kafka_smart_producer.health import (
     PartitionSelectionStrategy,
     TopicHealth,
 )
-from kafka_smart_producer.threading import ThreadSafeCache
 
 
 class MockLagDataCollector:
@@ -176,7 +176,9 @@ class TestDefaultHealthManager:
         """Create a health manager with mock dependencies."""
         lag_collector = MockLagDataCollector(lag_data)
         health_calculator = MockHotPartitionCalculator()
-        cache = ThreadSafeCache(max_size=100, default_ttl=60.0)
+        cache = DefaultLocalCache(
+            CacheConfig(local_max_size=100, local_default_ttl_seconds=60.0)
+        )
         config = config or HealthManagerConfig(refresh_interval_seconds=0.1)
 
         return DefaultHealthManager(lag_collector, health_calculator, cache, config)
@@ -371,19 +373,20 @@ class TestDefaultHealthManager:
         partition = manager.select_partition("unknown-topic")
         assert 0 <= partition < 3  # Default partition count
 
-    def test_fallback_with_key(self):
-        """Test fallback selection with message key."""
+    def test_fallback_round_robin(self):
+        """Test fallback selection uses round-robin."""
         manager = self.create_health_manager()
 
-        # Select with same key multiple times
-        key = b"test-key"
+        # Select partitions multiple times for same topic
         partitions = []
         for _ in range(10):
-            partition = manager.select_partition("unknown-topic", key=key)
+            partition = manager.select_partition("unknown-topic")
             partitions.append(partition)
 
-        # Should always return same partition for same key
-        assert all(p == partitions[0] for p in partitions)
+        # Should cycle through partitions in round-robin fashion
+        # With default_partition_count=3, we should see 0, 1, 2, 0, 1, 2, etc.
+        expected_pattern = [0, 1, 2, 0, 1, 2, 0, 1, 2, 0]
+        assert partitions == expected_pattern
 
     def test_fallback_with_available_partitions(self):
         """Test fallback selection with available partitions constraint."""
@@ -447,7 +450,7 @@ class TestDefaultHealthManager:
         """Test error handling when lag collector fails."""
         lag_collector = MockLagDataCollector(should_fail=True)
         health_calculator = MockHotPartitionCalculator()
-        cache = ThreadSafeCache()
+        cache = DefaultLocalCache(CacheConfig())
         config = HealthManagerConfig()
 
         manager = DefaultHealthManager(lag_collector, health_calculator, cache, config)
@@ -463,7 +466,7 @@ class TestDefaultHealthManager:
         """Test error handling when health calculator fails."""
         lag_collector = MockLagDataCollector({"test-topic": {0: 100, 1: 200}})
         health_calculator = MockHotPartitionCalculator(should_fail=True)
-        cache = ThreadSafeCache()
+        cache = DefaultLocalCache(CacheConfig())
         config = HealthManagerConfig()
 
         manager = DefaultHealthManager(lag_collector, health_calculator, cache, config)
@@ -569,7 +572,7 @@ class TestDefaultHealthManager:
         """Test handling of max refresh failures."""
         lag_collector = MockLagDataCollector(should_fail=True)
         health_calculator = MockHotPartitionCalculator()
-        cache = ThreadSafeCache()
+        cache = DefaultLocalCache(CacheConfig())
         config = HealthManagerConfig(max_refresh_failures=2)
 
         manager = DefaultHealthManager(lag_collector, health_calculator, cache, config)
@@ -605,7 +608,7 @@ class TestExceptionClasses:
         manager = DefaultHealthManager(
             MockLagDataCollector(),
             MockHotPartitionCalculator(),
-            ThreadSafeCache(),
+            DefaultLocalCache(CacheConfig()),
             HealthManagerConfig(),
         )
 
@@ -622,7 +625,7 @@ class TestPartitionSelectionEdgeCases:
         manager = DefaultHealthManager(
             MockLagDataCollector({"test-topic": {}}),
             MockHotPartitionCalculator(),
-            ThreadSafeCache(),
+            DefaultLocalCache(CacheConfig()),
             HealthManagerConfig(),
         )
 
@@ -637,7 +640,7 @@ class TestPartitionSelectionEdgeCases:
         manager = DefaultHealthManager(
             MockLagDataCollector(),
             MockHotPartitionCalculator(),
-            ThreadSafeCache(),
+            DefaultLocalCache(CacheConfig()),
             HealthManagerConfig(),
         )
 
@@ -658,7 +661,7 @@ class TestPartitionSelectionEdgeCases:
         manager = DefaultHealthManager(
             MockLagDataCollector(lag_data),
             MockHotPartitionCalculator(),
-            ThreadSafeCache(),
+            DefaultLocalCache(CacheConfig()),
             config,
         )
 

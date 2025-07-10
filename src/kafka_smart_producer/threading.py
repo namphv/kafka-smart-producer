@@ -10,54 +10,7 @@ import logging
 import threading
 from typing import Any, Callable, Optional, Union
 
-from cachetools import TTLCache
-
 logger = logging.getLogger(__name__)
-
-
-class ThreadSafeCache:
-    """
-    Thread-safe cache using cachetools.TTLCache with lock protection.
-
-    Provides a simple, reliable caching solution using proven libraries
-    instead of custom implementations.
-    """
-
-    def __init__(self, max_size: int = 1000, default_ttl: float = 300.0):
-        """
-        Initialize thread-safe cache.
-
-        Args:
-            max_size: Maximum number of entries in cache
-            default_ttl: Default TTL in seconds for cache entries
-        """
-        self._cache: TTLCache[str, Any] = TTLCache(maxsize=max_size, ttl=default_ttl)
-        self._lock = threading.RLock()
-
-    def get(self, key: str) -> Optional[Any]:
-        """Get value from cache. Thread-safe."""
-        with self._lock:
-            return self._cache.get(key)
-
-    def set(self, key: str, value: Any) -> None:
-        """Set value in cache. Thread-safe."""
-        with self._lock:
-            self._cache[key] = value
-
-    def delete(self, key: str) -> None:
-        """Delete key from cache. Thread-safe."""
-        with self._lock:
-            self._cache.pop(key, None)
-
-    def clear(self) -> None:
-        """Clear all cache entries. Thread-safe."""
-        with self._lock:
-            self._cache.clear()
-
-    def size(self) -> int:
-        """Get current cache size. Thread-safe."""
-        with self._lock:
-            return len(self._cache)
 
 
 async def run_periodic_async(
