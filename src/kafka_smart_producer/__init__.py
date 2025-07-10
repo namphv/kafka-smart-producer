@@ -45,7 +45,6 @@ from .health import (
     HealthManagerConfig,
     NoHealthyPartitionsError,
     PartitionHealth,
-    PartitionSelectionStrategy,
     TopicHealth,
 )
 
@@ -102,7 +101,7 @@ __all__ = [
     "HealthManagerConfig",
     "PartitionHealth",
     "TopicHealth",
-    "PartitionSelectionStrategy",
+    # Removed PartitionSelectionStrategy
     "NoHealthyPartitionsError",
     # Producer classes
     "SmartProducer",

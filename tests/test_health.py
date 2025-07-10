@@ -23,7 +23,6 @@ from kafka_smart_producer.health import (
     HealthManagerConfig,
     NoHealthyPartitionsError,
     PartitionHealth,
-    PartitionSelectionStrategy,
     TopicHealth,
 )
 
@@ -148,7 +147,6 @@ class TestHealthManagerConfig:
         assert config.refresh_interval_seconds == 5.0
         assert config.health_threshold == 0.5
         assert config.cache_ttl_seconds == 60.0
-        assert config.selection_strategy == PartitionSelectionStrategy.RANDOM
         assert config.default_partition_count == 3
         assert config.max_refresh_failures == 5
 
@@ -157,12 +155,10 @@ class TestHealthManagerConfig:
         config = HealthManagerConfig(
             refresh_interval_seconds=10.0,
             health_threshold=0.7,
-            selection_strategy=PartitionSelectionStrategy.ROUND_ROBIN,
         )
 
         assert config.refresh_interval_seconds == 10.0
         assert config.health_threshold == 0.7
-        assert config.selection_strategy == PartitionSelectionStrategy.ROUND_ROBIN
 
 
 class TestDefaultHealthManager:
@@ -276,134 +272,95 @@ class TestDefaultHealthManager:
         assert health.partitions[2].health_score > health.partitions[0].health_score
         assert health.partitions[0].health_score > health.partitions[1].health_score
 
-    def test_partition_selection_random(self):
-        """Test random partition selection strategy."""
+    def test_get_healthy_partitions_consistency(self):
+        """Test that get_healthy_partitions returns consistent results."""
         lag_data = {"test-topic": {0: 100, 1: 500, 2: 50}}  # 0 and 2 should be healthy
-        config = HealthManagerConfig(
-            selection_strategy=PartitionSelectionStrategy.RANDOM, health_threshold=0.4
-        )
+        config = HealthManagerConfig(health_threshold=0.4)
         manager = self.create_health_manager(lag_data, config)
 
         # Refresh health data
         manager.force_refresh("test-topic")
 
-        # Select partitions multiple times
+        # Get healthy partitions multiple times
         selections = []
-        for _ in range(20):
-            partition = manager.select_partition("test-topic")
-            selections.append(partition)
+        for _ in range(10):
+            healthy_partitions = manager.get_healthy_partitions("test-topic")
+            selections.append(set(healthy_partitions))
 
-        # Should only select healthy partitions
-        unique_selections = set(selections)
-        assert unique_selections.issubset({0, 2})  # Only healthy partitions
-        assert len(unique_selections) >= 1  # At least some variation
+        # Should consistently return the same healthy partitions
+        expected_healthy = {0, 2}  # Only healthy partitions
+        for selection in selections:
+            assert selection == expected_healthy
 
-    def test_partition_selection_round_robin(self):
-        """Test round-robin partition selection strategy."""
+    def test_get_healthy_partitions_basic(self):
+        """Test getting healthy partitions for a topic."""
         lag_data = {"test-topic": {0: 100, 1: 500, 2: 50}}
-        config = HealthManagerConfig(
-            selection_strategy=PartitionSelectionStrategy.ROUND_ROBIN,
-            health_threshold=0.4,
-        )
+        config = HealthManagerConfig(health_threshold=0.4)
         manager = self.create_health_manager(lag_data, config)
 
         # Refresh health data
         manager.force_refresh("test-topic")
 
         # Get healthy partitions
-        health = manager.get_topic_health("test-topic")
-        healthy_partitions = health.healthy_partitions
+        healthy_partitions = manager.get_healthy_partitions("test-topic")
 
-        # Select partitions in round-robin order
-        selections = []
-        for _ in range(6):  # 2 full rounds
-            partition = manager.select_partition("test-topic")
-            selections.append(partition)
+        # Should return healthy partitions based on health threshold
+        expected_healthy = [0, 2]  # Partitions with health score >= 0.4
+        assert set(healthy_partitions) == set(expected_healthy)
 
-        # Should cycle through healthy partitions
-        expected_pattern = healthy_partitions * 2  # 2 full cycles
-        assert selections[: len(expected_pattern)] == expected_pattern
-
-    def test_partition_selection_least_lag(self):
-        """Test least lag partition selection strategy."""
-        lag_data = {"test-topic": {0: 100, 1: 500, 2: 50}}  # Partition 2 has least lag
-        config = HealthManagerConfig(
-            selection_strategy=PartitionSelectionStrategy.LEAST_LAG,
-            health_threshold=0.0,  # All partitions healthy
-        )
+    def test_get_healthy_partitions_with_available_filter(self):
+        """Test getting healthy partitions with available partitions filter."""
+        lag_data = {"test-topic": {0: 100, 1: 500, 2: 50, 3: 75}}
+        config = HealthManagerConfig(health_threshold=0.4)
         manager = self.create_health_manager(lag_data, config)
 
         # Refresh health data
         manager.force_refresh("test-topic")
 
-        # Select partitions multiple times
-        for _ in range(10):
-            partition = manager.select_partition("test-topic")
-            assert partition == 2  # Always least lag partition
+        # Get healthy partitions with available filter
+        available_partitions = [1, 2, 3]
+        healthy_partitions = manager.get_healthy_partitions(
+            "test-topic", available_partitions
+        )
 
-    def test_partition_selection_weighted_random(self):
-        """Test weighted random partition selection strategy."""
+        # Should return intersection of healthy and available partitions
+        expected_healthy = [2, 3]  # Healthy partitions that are also available
+        assert set(healthy_partitions) == set(expected_healthy)
+
+    def test_get_healthy_partitions_fallback(self):
+        """Test getting healthy partitions when no health data available."""
+        manager = self.create_health_manager()
+
+        # Get healthy partitions for unknown topic
+        healthy_partitions = manager.get_healthy_partitions("unknown-topic")
+        assert healthy_partitions == [0, 1, 2]  # Default partition count
+
+    def test_get_healthy_partitions_no_healthy(self):
+        """Test getting healthy partitions when no partitions are healthy."""
         lag_data = {"test-topic": {0: 100, 1: 500, 2: 50}}
-        config = HealthManagerConfig(
-            selection_strategy=PartitionSelectionStrategy.WEIGHTED_RANDOM,
-            health_threshold=0.0,  # All partitions healthy
-        )
+        config = HealthManagerConfig(health_threshold=0.95)  # Very high threshold
         manager = self.create_health_manager(lag_data, config)
 
         # Refresh health data
         manager.force_refresh("test-topic")
 
-        # Select partitions multiple times
-        selections = []
-        for _ in range(100):
-            partition = manager.select_partition("test-topic")
-            selections.append(partition)
+        # Get healthy partitions - should fall back to all partitions
+        healthy_partitions = manager.get_healthy_partitions("test-topic")
+        assert healthy_partitions == [0, 1, 2]  # Default partition count as fallback
 
-        # Partition 2 should be selected more often (higher score)
-        partition_2_count = selections.count(2)
-        partition_1_count = selections.count(1)
-
-        assert partition_2_count > partition_1_count  # Better health = more selections
-
-    def test_fallback_partition_selection(self):
-        """Test fallback selection when no health data available."""
-        manager = self.create_health_manager()
-
-        # Select partition for unknown topic
-        partition = manager.select_partition("unknown-topic")
-        assert 0 <= partition < 3  # Default partition count
-
-    def test_fallback_round_robin(self):
-        """Test fallback selection uses round-robin."""
-        manager = self.create_health_manager()
-
-        # Select partitions multiple times for same topic
-        partitions = []
-        for _ in range(10):
-            partition = manager.select_partition("unknown-topic")
-            partitions.append(partition)
-
-        # Should cycle through partitions in round-robin fashion
-        # With default_partition_count=3, we should see 0, 1, 2, 0, 1, 2, etc.
-        expected_pattern = [0, 1, 2, 0, 1, 2, 0, 1, 2, 0]
-        assert partitions == expected_pattern
-
-    def test_fallback_with_available_partitions(self):
-        """Test fallback selection with available partitions constraint."""
+    def test_get_healthy_partitions_with_available_fallback(self):
+        """Test getting healthy partitions with available partitions as fallback."""
         manager = self.create_health_manager()
 
         available_partitions = [1, 3, 5]
 
-        # Select multiple times
-        selections = []
-        for _ in range(20):
-            partition = manager.select_partition(
-                "unknown-topic", available_partitions=available_partitions
-            )
-            selections.append(partition)
+        # Get healthy partitions for unknown topic with available constraint
+        healthy_partitions = manager.get_healthy_partitions(
+            "unknown-topic", available_partitions
+        )
 
-        # Should only select from available partitions
-        assert all(p in available_partitions for p in selections)
+        # Should return available partitions as fallback
+        assert healthy_partitions == available_partitions
 
     def test_is_partition_healthy(self):
         """Test partition health checking."""
@@ -458,9 +415,9 @@ class TestDefaultHealthManager:
         # Force refresh should not crash
         manager.force_refresh("test-topic")
 
-        # Should still return fallback partition
-        partition = manager.select_partition("test-topic")
-        assert isinstance(partition, int)
+        # Should still return fallback partitions
+        partitions = manager.get_healthy_partitions("test-topic")
+        assert partitions == [0, 1, 2]  # Default partition count
 
     def test_error_handling_calculator_failure(self):
         """Test error handling when health calculator fails."""
@@ -474,9 +431,9 @@ class TestDefaultHealthManager:
         # Force refresh should not crash
         manager.force_refresh("test-topic")
 
-        # Should still return fallback partition
-        partition = manager.select_partition("test-topic")
-        assert isinstance(partition, int)
+        # Should still return fallback partitions
+        partitions = manager.get_healthy_partitions("test-topic")
+        assert partitions == [0, 1, 2]  # Default partition count
 
     @pytest.mark.asyncio
     async def test_background_refresh_async(self):
@@ -547,7 +504,8 @@ class TestDefaultHealthManager:
         def worker():
             try:
                 for _ in range(50):
-                    partition = manager.select_partition("test-topic")
+                    partitions = manager.get_healthy_partitions("test-topic")
+                    partition = partitions[0] if partitions else 0
                     results.append(partition)
 
                     if len(results) % 10 == 0:
@@ -613,8 +571,10 @@ class TestExceptionClasses:
         )
 
         # Should handle empty partitions gracefully
-        with pytest.raises(PartitionSelectionError):
-            manager.select_partition("test-topic", available_partitions=[])
+        partitions = manager.get_healthy_partitions(
+            "test-topic", available_partitions=[]
+        )
+        assert partitions == []  # Empty available partitions should return empty
 
 
 class TestPartitionSelectionEdgeCases:
@@ -632,8 +592,8 @@ class TestPartitionSelectionEdgeCases:
         manager.force_refresh("test-topic")
 
         # Should fallback gracefully
-        partition = manager.select_partition("test-topic")
-        assert isinstance(partition, int)
+        partitions = manager.get_healthy_partitions("test-topic")
+        assert partitions == [0, 1, 2]  # Default partition count
 
     def test_zero_weights_weighted_random(self):
         """Test weighted random with zero weights."""
@@ -644,18 +604,14 @@ class TestPartitionSelectionEdgeCases:
             HealthManagerConfig(),
         )
 
-        # Test with zero weights
-        choices = [0, 1, 2]
-        weights = [0.0, 0.0, 0.0]
-
-        result = manager._weighted_random_choice(choices, weights)
-        assert result in choices
+        # Test getting healthy partitions when no health data
+        partitions = manager.get_healthy_partitions("test-topic")
+        assert partitions == [0, 1, 2]  # Default partition count
 
     def test_single_partition_topic(self):
         """Test handling of single partition topics."""
         lag_data = {"single-partition": {0: 100}}
         config = HealthManagerConfig(
-            selection_strategy=PartitionSelectionStrategy.RANDOM,
             health_threshold=0.0,  # Ensure partition 0 is healthy
         )
         manager = DefaultHealthManager(
@@ -674,7 +630,6 @@ class TestPartitionSelectionEdgeCases:
         assert health.partitions[0].is_healthy
         assert health.healthy_partitions == [0]
 
-        # Should always select the only partition
-        for _ in range(10):
-            partition = manager.select_partition("single-partition")
-            assert partition == 0
+        # Should always return the only partition
+        partitions = manager.get_healthy_partitions("single-partition")
+        assert partitions == [0]

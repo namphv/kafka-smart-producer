@@ -8,6 +8,7 @@ selection with minimal overhead.
 
 import asyncio
 import logging
+import random
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
@@ -270,7 +271,10 @@ class SmartProducer(ConfluentProducer):  # type: ignore[misc]
         """Select partition via health manager."""
         if self._health_manager and self._health_check_enabled:
             try:
-                return self._health_manager.select_partition(topic)
+                healthy_partitions = self._health_manager.get_healthy_partitions(topic)
+                if healthy_partitions:
+                    return random.choice(healthy_partitions)
+                return None
             except Exception as e:
                 logger.debug(f"Health manager selection failed for topic {topic}: {e}")
         return None
