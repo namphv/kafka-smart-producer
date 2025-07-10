@@ -96,7 +96,9 @@ class TestAsyncSmartProducerInitialization:
         producer = AsyncSmartProducer(basic_config)
 
         # Should create sync producer
-        mock_class.assert_called_once_with(basic_config, None)
+        mock_class.assert_called_once_with(
+            basic_config, None, enable_redis=False, cache=None
+        )
 
         # Should not be closed initially
         assert not producer.closed
@@ -113,7 +115,9 @@ class TestAsyncSmartProducerInitialization:
         producer = AsyncSmartProducer(basic_config, health_manager, max_workers=8)
 
         # Should create sync producer with health manager
-        mock_class.assert_called_once_with(basic_config, health_manager)
+        mock_class.assert_called_once_with(
+            basic_config, health_manager, enable_redis=False, cache=None
+        )
 
         # Should use custom max_workers
         assert producer._executor._max_workers == 8

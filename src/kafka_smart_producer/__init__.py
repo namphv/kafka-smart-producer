@@ -14,6 +14,7 @@ __email__ = "your.email@example.com"
 from .caching import (
     CacheConfig,
     CacheEntry,
+    CacheFactory,
     CacheLevel,
     CacheStats,
     CacheTimeoutError,
@@ -86,6 +87,7 @@ __all__ = [
     "DefaultHybridCache",
     "CacheConfig",
     "CacheEntry",
+    "CacheFactory",
     "CacheLevel",
     "CacheStats",
     "CacheTimeoutError",

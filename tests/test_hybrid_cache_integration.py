@@ -22,8 +22,10 @@ class TestHybridCacheIntegration:
         producer = SmartProducer.__new__(SmartProducer)
         smart_config = producer._extract_smart_config(config.copy())
 
-        # Test hybrid cache creation
-        hybrid_cache = producer._create_secure_hybrid_cache(
+        # Test hybrid cache creation using CacheFactory
+        from kafka_smart_producer.caching import CacheFactory
+
+        hybrid_cache = CacheFactory.create_hybrid_cache(
             smart_config, enable_redis=False
         )
 
@@ -55,7 +57,9 @@ class TestHybridCacheIntegration:
 
         producer = SmartProducer.__new__(SmartProducer)
         smart_config = producer._extract_smart_config(config.copy())
-        hybrid_cache = producer._create_secure_hybrid_cache(
+        from kafka_smart_producer.caching import CacheFactory
+
+        hybrid_cache = CacheFactory.create_hybrid_cache(
             smart_config, enable_redis=False
         )
 
@@ -81,9 +85,9 @@ class TestHybridCacheIntegration:
 
         producer = SmartProducer.__new__(SmartProducer)
         smart_config = producer._extract_smart_config(config.copy())
-        hybrid_cache = producer._create_secure_hybrid_cache(
-            smart_config, enable_redis=True
-        )
+        from kafka_smart_producer.caching import CacheFactory
+
+        hybrid_cache = CacheFactory.create_hybrid_cache(smart_config, enable_redis=True)
 
         # Should have local cache but remote should be None due to connection failure
         assert hybrid_cache._local is not None
@@ -105,12 +109,17 @@ class TestHybridCacheIntegration:
 
         # Set up components manually
         producer._health_manager = None
-        producer._key_cache = producer._create_secure_hybrid_cache(
+        from kafka_smart_producer.caching import CacheFactory
+
+        producer._key_cache = CacheFactory.create_hybrid_cache(
             smart_config, enable_redis=False
         )
         producer._cache_ttl_ms = smart_config["cache_ttl_ms"]
         producer._health_check_enabled = smart_config["health_check_enabled"]
         producer._smart_enabled = smart_config["enabled"]
+        producer._cache_key_prefix = smart_config.get(
+            "cache_key_prefix", "kafka_smart_producer"
+        )
 
         # Test _select_partition with hybrid cache
         topic = "test-topic"
@@ -140,12 +149,17 @@ class TestHybridCacheIntegration:
         smart_config = producer._extract_smart_config(config.copy())
 
         producer._health_manager = None
-        producer._key_cache = producer._create_secure_hybrid_cache(
+        from kafka_smart_producer.caching import CacheFactory
+
+        producer._key_cache = CacheFactory.create_hybrid_cache(
             smart_config, enable_redis=False
         )
         producer._cache_ttl_ms = smart_config["cache_ttl_ms"]
         producer._health_check_enabled = smart_config["health_check_enabled"]
         producer._smart_enabled = smart_config["enabled"]
+        producer._cache_key_prefix = smart_config.get(
+            "cache_key_prefix", "kafka_smart_producer"
+        )
 
         # Test cache key format
         topic = "user-events"
@@ -170,7 +184,9 @@ class TestHybridCacheIntegration:
         producer = SmartProducer.__new__(SmartProducer)
         smart_config = producer._extract_smart_config(config.copy())
 
-        producer._key_cache = producer._create_secure_hybrid_cache(
+        from kafka_smart_producer.caching import CacheFactory
+
+        producer._key_cache = CacheFactory.create_hybrid_cache(
             smart_config, enable_redis=False
         )
 

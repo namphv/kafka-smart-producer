@@ -14,17 +14,15 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from confluent_kafka import Producer as ConfluentProducer
 
-from .caching import (
-    CacheConfig,
-    DefaultHybridCache,
-    DefaultLocalCache,
-    DefaultRemoteCache,
-)
+from .caching import CacheFactory, DefaultHybridCache
 
 if TYPE_CHECKING:
     from .health import HealthManager
 
 logger = logging.getLogger(__name__)
+
+# Default cache key prefix for partition caching
+DEFAULT_CACHE_KEY_PREFIX = "kafka_smart_producer"
 
 
 class SmartProducer(ConfluentProducer):  # type: ignore[misc]
@@ -40,6 +38,7 @@ class SmartProducer(ConfluentProducer):  # type: ignore[misc]
         config: Dict[str, Any],
         health_manager: Optional["HealthManager"] = None,
         enable_redis: bool = False,  # Simplified parameter
+        cache: Optional[DefaultHybridCache] = None,  # Dependency injection
     ) -> None:
         """
         Initialize the Smart Producer.
@@ -51,6 +50,8 @@ class SmartProducer(ConfluentProducer):  # type: ignore[misc]
                 - 'smart.cache.max.size': int (default: 1000, max cache entries)
                 - 'smart.health.check.enabled': bool (default: True)
             health_manager: Optional health manager for partition health queries
+            enable_redis: Enable Redis remote cache (ignored if cache provided)
+            cache: Optional pre-configured cache instance (overrides enable_redis)
         """
         # Extract smart producer specific config
         smart_config = self._extract_smart_config(config)
@@ -60,14 +61,24 @@ class SmartProducer(ConfluentProducer):  # type: ignore[misc]
 
         # Initialize smart producer components
         self._health_manager = health_manager if smart_config["enabled"] else None
-        self._key_cache = (
-            self._create_secure_hybrid_cache(smart_config, enable_redis)
-            if smart_config["enabled"]
-            else None
-        )
+
+        # Use provided cache or create one
+        self._key_cache: Optional[DefaultHybridCache]
+        if smart_config["enabled"]:
+            if cache is not None:
+                self._key_cache = cache
+            else:
+                self._key_cache = CacheFactory.create_hybrid_cache(
+                    smart_config, enable_redis
+                )
+        else:
+            self._key_cache = None
         self._cache_ttl_ms = smart_config["cache_ttl_ms"]
         self._health_check_enabled = smart_config["health_check_enabled"]
         self._smart_enabled = smart_config["enabled"]
+        self._cache_key_prefix = smart_config.get(
+            "cache_key_prefix", DEFAULT_CACHE_KEY_PREFIX
+        )
 
         logger.info(
             f"SmartProducer initialized - smart partitioning: \
@@ -100,65 +111,12 @@ class SmartProducer(ConfluentProducer):  # type: ignore[misc]
             "redis_ssl_ca_certs": config.pop("smart.cache.redis.ssl.ca_certs", None),
             "redis_ssl_certfile": config.pop("smart.cache.redis.ssl.certfile", None),
             "redis_ssl_keyfile": config.pop("smart.cache.redis.ssl.keyfile", None),
+            # Cache key prefix
+            "cache_key_prefix": config.pop(
+                "smart.cache.key.prefix", DEFAULT_CACHE_KEY_PREFIX
+            ),
         }
         return smart_config
-
-    def _create_secure_hybrid_cache(
-        self, smart_config: Dict[str, Any], enable_redis: bool
-    ) -> DefaultHybridCache:
-        """Create secure hybrid cache with proper SSL/TLS support."""
-        cache_config = CacheConfig(
-            local_max_size=smart_config["cache_max_size"],
-            local_default_ttl_seconds=smart_config["cache_ttl_ms"] / 1000.0,
-            remote_default_ttl_seconds=smart_config["redis_ttl_seconds"],
-            ordered_message_ttl=smart_config["ordered_message_ttl"],
-            stats_collection_enabled=True,
-        )
-
-        # Create local cache (always enabled)
-        local_cache = DefaultLocalCache(cache_config)
-
-        # Create remote cache (Redis) if enabled
-        remote_cache = None
-        if enable_redis:
-            try:
-                redis_config = {
-                    "host": smart_config["redis_host"],
-                    "port": smart_config["redis_port"],
-                    "db": smart_config["redis_db"],
-                    "password": smart_config.get("redis_password"),
-                    "ssl_enabled": smart_config.get("redis_ssl_enabled", False),
-                    "ssl_cert_reqs": smart_config.get(
-                        "redis_ssl_cert_reqs", "required"
-                    ),
-                    "ssl_ca_certs": smart_config.get("redis_ssl_ca_certs"),
-                    "ssl_certfile": smart_config.get("redis_ssl_certfile"),
-                    "ssl_keyfile": smart_config.get("redis_ssl_keyfile"),
-                }
-
-                remote_cache_instance = DefaultRemoteCache(redis_config)
-
-                if remote_cache_instance._redis is not None:
-                    remote_cache = remote_cache_instance
-                    ssl_status = (
-                        "with SSL"
-                        if smart_config.get("redis_ssl_enabled")
-                        else "without SSL"
-                    )
-                    logger.info(
-                        f"Redis remote cache enabled: "
-                        f"{smart_config['redis_host']}:{smart_config['redis_port']} "
-                        f"({ssl_status})"
-                    )
-                else:
-                    logger.warning(
-                        "Redis connection failed, falling back to local cache only"
-                    )
-
-            except Exception as e:
-                logger.warning(f"Failed to initialize Redis remote cache: {e}")
-
-        return DefaultHybridCache(local_cache, remote_cache, cache_config)
 
     def produce(
         self,
@@ -222,50 +180,36 @@ class SmartProducer(ConfluentProducer):  # type: ignore[misc]
     def _select_partition_with_ordering(
         self, topic: str, key: bytes, ordered: bool
     ) -> Optional[int]:
-        """Select partition with simplified logic for ordered vs unordered messages."""
+        """Select partition with caching for message ordering when needed."""
 
-        # For unordered messages: Just get a healthy partition, no caching
-        if not ordered:
+        # If no cache or unordered messages, just get a healthy partition
+        if not self._key_cache or not ordered:
             return self._select_via_health_manager(topic)
 
-        # For ordered messages: Use caching for key stickiness
-        if not self._key_cache:
-            return self._select_via_health_manager(topic)
-
-        # Create cache key with app-specific prefix
-        cache_key = f"kafka_smart_producer:{topic}:{key.hex()}"
-
-        # Check cache first for ordered messages
+        # For ordered messages: check cache first for key stickiness
+        cache_key = f"{self._cache_key_prefix}:{topic}:{key.hex()}"
         cached_partition = self._key_cache.get_sync(cache_key)
 
         if cached_partition is not None:
-            # Validate partition is still healthy
-            if self._health_manager and self._health_check_enabled:
-                try:
-                    if self._health_manager.is_partition_healthy(
-                        topic, cached_partition
-                    ):
-                        return int(cached_partition)
-                    else:
-                        # Partition unhealthy, invalidate topic cache
-                        topic_pattern = f"kafka_smart_producer:{topic}:*"
-                        self._key_cache.clear_pattern(topic_pattern)
-                except Exception as e:
-                    logger.debug(
-                        f"Health check failed for partition {cached_partition}: {e}"
-                    )
+            # Validate cached partition is still healthy
+            if (
+                self._health_manager
+                and self._health_check_enabled
+                and not self._health_manager.is_partition_healthy(
+                    topic, cached_partition
+                )
+            ):
+                # Partition unhealthy, invalidate cache entry
+                self._key_cache.delete_sync(cache_key)
             else:
                 return int(cached_partition)
 
-        # Get fresh partition from health manager
+        # Get fresh healthy partition and cache it for ordered messages
         selected_partition = self._select_via_health_manager(topic)
-
         if selected_partition is not None:
-            # Cache only for ordered messages (key stickiness)
             self._key_cache.set_with_ordered_ttl(cache_key, selected_partition)
-            return selected_partition
 
-        return None
+        return selected_partition
 
     def _select_via_health_manager(self, topic: str) -> Optional[int]:
         """Select partition via health manager."""
@@ -340,7 +284,8 @@ class AsyncSmartProducer:
         self,
         config: Dict[str, Any],
         health_manager: Optional["HealthManager"] = None,
-        max_workers: int = 4,
+        max_workers: Optional[int] = None,
+        cache: Optional[DefaultHybridCache] = None,
     ) -> None:
         """
         Initialize the Async Smart Producer.
@@ -348,9 +293,16 @@ class AsyncSmartProducer:
         Args:
             config: Standard Kafka producer config dict with optional smart config
             health_manager: Optional health manager for partition health queries
-            max_workers: Maximum workers for the thread pool executor
+            max_workers: Maximum workers for the thread pool executor (default: 4)
+            cache: Optional pre-configured cache instance
         """
-        self._sync_producer = SmartProducer(config, health_manager)
+        # Extract async-specific config
+        if max_workers is None:
+            max_workers = config.get("smart.async.max_workers", 4)
+
+        self._sync_producer = SmartProducer(
+            config, health_manager, enable_redis=False, cache=cache
+        )
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="async-smart-producer"
         )
