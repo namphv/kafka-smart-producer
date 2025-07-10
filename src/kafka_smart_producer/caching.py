@@ -418,6 +418,28 @@ class DefaultLocalCache:
                 if node:
                     self._remove_node(node)
 
+    # Compatibility methods for unified cache interface
+    def get_sync(self, key: str) -> Optional[Any]:
+        """Synchronous get (same as get for local cache)."""
+        return self.get(key)
+
+    def delete_sync(self, key: str) -> None:
+        """Synchronous delete (same as delete for local cache)."""
+        self.delete(key)
+
+    def set_with_ordered_ttl(self, key: str, value: Any) -> None:
+        """Set value with TTL for ordered messages."""
+        # Use default TTL for local cache
+        self.set(key, value, self._config.local_default_ttl_seconds)
+
+    def is_remote_available(self) -> bool:
+        """Check if remote cache is available (always False for local cache)."""
+        return False
+
+    def get_combined_stats(self) -> Dict[str, CacheStats]:
+        """Get statistics (local cache only)."""
+        return {"local": self._stats}
+
 
 class DefaultHybridCache:
     """Enhanced hybrid cache with local and remote cache support."""
@@ -824,6 +846,32 @@ class DefaultRemoteCache:
         """Get cache performance statistics."""
         return self._stats
 
+    # Compatibility methods for unified cache interface
+    def set_with_ordered_ttl(self, key: str, value: Any) -> None:
+        """Set value with TTL for ordered messages."""
+        # Use a longer TTL for ordered messages (1 hour)
+        self.set_sync(key, value, 3600.0)
+
+    def is_remote_available(self) -> bool:
+        """Check if remote cache is available."""
+        return self._redis is not None
+
+    def clear(self) -> None:
+        """Clear all cache entries safely."""
+        if not self._redis:
+            return
+        try:
+            # Use app-specific pattern to avoid clearing other apps' data
+            for key in self._redis.scan_iter(match="kafka_smart_producer:*", count=100):
+                self._redis.delete(key)
+        except Exception as e:
+            # Ignore errors during clear but log for debugging
+            logger.debug(f"Error clearing Redis cache: {e}")
+
+    def get_combined_stats(self) -> Dict[str, CacheStats]:
+        """Get statistics (remote cache only)."""
+        return {"remote": self._stats}
+
 
 class CacheUnavailableError(CacheError):
     """Raised when cache backend is unavailable."""
@@ -835,6 +883,58 @@ class CacheTimeoutError(CacheError):
 
 class CacheFactory:
     """Factory for creating configured cache instances."""
+
+    @staticmethod
+    def create_local_cache(smart_config: Dict[str, Any]) -> "DefaultLocalCache":
+        """Create standalone local cache instance."""
+        cache_config = CacheConfig(
+            local_max_size=smart_config.get("cache_max_size", 1000),
+            local_default_ttl_seconds=smart_config.get("cache_ttl_ms", 300000) / 1000.0,
+            ordered_message_ttl=smart_config.get("ordered_message_ttl", 3600.0),
+            stats_collection_enabled=True,
+        )
+        return DefaultLocalCache(cache_config)
+
+    @staticmethod
+    def create_remote_cache(
+        smart_config: Dict[str, Any],
+    ) -> Optional["DefaultRemoteCache"]:
+        """Create standalone remote cache instance if configuration is valid."""
+        try:
+            redis_config = {
+                "host": smart_config["redis_host"],
+                "port": smart_config["redis_port"],
+                "db": smart_config["redis_db"],
+                "password": smart_config.get("redis_password"),
+                "ssl_enabled": smart_config.get("redis_ssl_enabled", False),
+                "ssl_cert_reqs": smart_config.get("redis_ssl_cert_reqs", "required"),
+                "ssl_ca_certs": smart_config.get("redis_ssl_ca_certs"),
+                "ssl_certfile": smart_config.get("redis_ssl_certfile"),
+                "ssl_keyfile": smart_config.get("redis_ssl_keyfile"),
+            }
+
+            remote_cache_instance = DefaultRemoteCache(redis_config)
+            if remote_cache_instance._redis is not None:
+                ssl_status = (
+                    "with SSL"
+                    if smart_config.get("redis_ssl_enabled")
+                    else "without SSL"
+                )
+                logger.info(
+                    f"Redis remote cache created: "
+                    f"{smart_config['redis_host']}:{smart_config['redis_port']} "
+                    f"({ssl_status})"
+                )
+                return remote_cache_instance
+            else:
+                logger.warning("Redis connection failed, returning None")
+                return None
+        except KeyError as e:
+            logger.error(f"Missing required Redis configuration key: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to initialize remote cache: {e}")
+            return None
 
     @staticmethod
     def create_hybrid_cache(
@@ -849,47 +949,16 @@ class CacheFactory:
             stats_collection_enabled=True,
         )
 
-        # Create local cache (always enabled)
-        local_cache = DefaultLocalCache(cache_config)
+        # Create local cache using factory method
+        local_cache = CacheFactory.create_local_cache(smart_config)
 
-        # Create remote cache (Redis) if enabled
+        # Create remote cache using factory method if enabled
         remote_cache = None
         if enable_redis:
-            try:
-                redis_config = {
-                    "host": smart_config["redis_host"],
-                    "port": smart_config["redis_port"],
-                    "db": smart_config["redis_db"],
-                    "password": smart_config.get("redis_password"),
-                    "ssl_enabled": smart_config.get("redis_ssl_enabled", False),
-                    "ssl_cert_reqs": smart_config.get(
-                        "redis_ssl_cert_reqs", "required"
-                    ),
-                    "ssl_ca_certs": smart_config.get("redis_ssl_ca_certs"),
-                    "ssl_certfile": smart_config.get("redis_ssl_certfile"),
-                    "ssl_keyfile": smart_config.get("redis_ssl_keyfile"),
-                }
-
-                remote_cache_instance = DefaultRemoteCache(redis_config)
-
-                if remote_cache_instance._redis is not None:
-                    remote_cache = remote_cache_instance
-                    ssl_status = (
-                        "with SSL"
-                        if smart_config.get("redis_ssl_enabled")
-                        else "without SSL"
-                    )
-                    logger.info(
-                        f"Redis remote cache enabled: "
-                        f"{smart_config['redis_host']}:{smart_config['redis_port']} "
-                        f"({ssl_status})"
-                    )
-                else:
-                    logger.warning(
-                        "Redis connection failed, falling back to local cache only"
-                    )
-
-            except Exception as e:
-                logger.warning(f"Failed to initialize Redis remote cache: {e}")
+            remote_cache = CacheFactory.create_remote_cache(smart_config)
+            if remote_cache is None:
+                logger.warning(
+                    "Redis connection failed, falling back to local cache only"
+                )
 
         return DefaultHybridCache(local_cache, remote_cache, cache_config)

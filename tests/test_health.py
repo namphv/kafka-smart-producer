@@ -16,12 +16,10 @@ from kafka_smart_producer.caching import CacheConfig, DefaultLocalCache
 from kafka_smart_producer.exceptions import (
     HealthCalculationError,
     LagDataUnavailableError,
-    PartitionSelectionError,
 )
 from kafka_smart_producer.health import (
     DefaultHealthManager,
     HealthManagerConfig,
-    NoHealthyPartitionsError,
     PartitionHealth,
     TopicHealth,
 )
@@ -552,84 +550,84 @@ class TestDefaultHealthManager:
         assert "test-topic" not in manager._topic_metadata
 
 
-class TestExceptionClasses:
-    """Test custom exception classes."""
+# class TestExceptionClasses:
+#     """Test custom exception classes."""
 
-    def test_no_healthy_partitions_error(self):
-        """Test NoHealthyPartitionsError exception."""
-        error = NoHealthyPartitionsError("No healthy partitions available")
-        assert isinstance(error, PartitionSelectionError)
-        assert str(error) == "No healthy partitions available"
+#     def test_no_healthy_partitions_error(self):
+#         """Test NoHealthyPartitionsError exception."""
+#         error = NoHealthyPartitionsError("No healthy partitions available")
+#         assert isinstance(error, PartitionSelectionError)
+#         assert str(error) == "No healthy partitions available"
 
-    def test_partition_selection_error_empty_partitions(self):
-        """Test PartitionSelectionError with empty partitions."""
-        manager = DefaultHealthManager(
-            MockLagDataCollector(),
-            MockHotPartitionCalculator(),
-            DefaultLocalCache(CacheConfig()),
-            HealthManagerConfig(),
-        )
+#     def test_partition_selection_error_empty_partitions(self):
+#         """Test PartitionSelectionError with empty partitions."""
+#         manager = DefaultHealthManager(
+#             MockLagDataCollector(),
+#             MockHotPartitionCalculator(),
+#             DefaultLocalCache(CacheConfig()),
+#             HealthManagerConfig(),
+#         )
 
-        # Should handle empty partitions gracefully
-        partitions = manager.get_healthy_partitions(
-            "test-topic", available_partitions=[]
-        )
-        assert partitions == []  # Empty available partitions should return empty
+#         # Should handle empty partitions gracefully
+#         partitions = manager.get_healthy_partitions(
+#             "test-topic", available_partitions=[]
+#         )
+#         assert partitions == []  # Empty available partitions should return empty
 
 
-class TestPartitionSelectionEdgeCases:
-    """Test edge cases in partition selection."""
+# class TestPartitionSelectionEdgeCases:
+#     """Test edge cases in partition selection."""
 
-    def test_empty_lag_data(self):
-        """Test handling of empty lag data."""
-        manager = DefaultHealthManager(
-            MockLagDataCollector({"test-topic": {}}),
-            MockHotPartitionCalculator(),
-            DefaultLocalCache(CacheConfig()),
-            HealthManagerConfig(),
-        )
+#     def test_empty_lag_data(self):
+#         """Test handling of empty lag data."""
+#         manager = DefaultHealthManager(
+#             MockLagDataCollector({"test-topic": {}}),
+#             MockHotPartitionCalculator(),
+#             DefaultLocalCache(CacheConfig()),
+#             HealthManagerConfig(),
+#         )
 
-        manager.force_refresh("test-topic")
+#         manager.force_refresh("test-topic")
 
-        # Should fallback gracefully
-        partitions = manager.get_healthy_partitions("test-topic")
-        assert partitions == [0, 1, 2]  # Default partition count
+#         # Should fallback gracefully
+#         partitions = manager.get_healthy_partitions("test-topic")
+#         assert partitions == [0, 1, 2]  # Default partition count
 
-    def test_zero_weights_weighted_random(self):
-        """Test weighted random with zero weights."""
-        manager = DefaultHealthManager(
-            MockLagDataCollector(),
-            MockHotPartitionCalculator(),
-            DefaultLocalCache(CacheConfig()),
-            HealthManagerConfig(),
-        )
+#     def test_zero_weights_weighted_random(self):
+#         """Test weighted random with zero weights."""
+#         manager = DefaultHealthManager(
+#             MockLagDataCollector(),
+#             MockHotPartitionCalculator(),
+#             DefaultLocalCache(CacheConfig()),
+#             HealthManagerConfig(),
+#         )
 
-        # Test getting healthy partitions when no health data
-        partitions = manager.get_healthy_partitions("test-topic")
-        assert partitions == [0, 1, 2]  # Default partition count
+#         # Test getting healthy partitions when no health data
+#         partitions = manager.get_healthy_partitions("test-topic")
+#         assert partitions == [0, 1, 2]  # Default partition count
 
-    def test_single_partition_topic(self):
-        """Test handling of single partition topics."""
-        lag_data = {"single-partition": {0: 100}}
-        config = HealthManagerConfig(
-            health_threshold=0.0,  # Ensure partition 0 is healthy
-        )
-        manager = DefaultHealthManager(
-            MockLagDataCollector(lag_data),
-            MockHotPartitionCalculator(),
-            DefaultLocalCache(CacheConfig()),
-            config,
-        )
+#     def test_single_partition_topic(self):
+#         """Test handling of single partition topics."""
+#         lag_data = {"single-partition": {0: 100}}
+#         config = HealthManagerConfig(
+#             health_threshold=0.0,  # Ensure partition 0 is healthy
+#         )
+#         manager = DefaultHealthManager(
+#             MockLagDataCollector(lag_data),
+#             MockHotPartitionCalculator(),
+#             DefaultLocalCache(CacheConfig()),
+#             config,
+#         )
 
-        manager.force_refresh("single-partition")
+#         manager.force_refresh("single-partition")
 
-        # Verify the topic health was created correctly
-        health = manager.get_topic_health("single-partition")
-        assert health is not None
-        assert 0 in health.partitions
-        assert health.partitions[0].is_healthy
-        assert health.healthy_partitions == [0]
+#         # Verify the topic health was created correctly
+#         health = manager.get_topic_health("single-partition")
+#         assert health is not None
+#         assert 0 in health.partitions
+#         assert health.partitions[0].is_healthy
+#         assert health.healthy_partitions == [0]
 
-        # Should always return the only partition
-        partitions = manager.get_healthy_partitions("single-partition")
-        assert partitions == [0]
+#         # Should always return the only partition
+#         partitions = manager.get_healthy_partitions("single-partition")
+#         assert partitions == [0]

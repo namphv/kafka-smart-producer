@@ -44,7 +44,6 @@ from .health import (
     DefaultHealthManager,
     HealthManager,
     HealthManagerConfig,
-    NoHealthyPartitionsError,
     PartitionHealth,
     TopicHealth,
 )

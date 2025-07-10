@@ -10,11 +10,16 @@ import asyncio
 import logging
 import random
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Union
 
 from confluent_kafka import Producer as ConfluentProducer
 
-from .caching import CacheFactory, DefaultHybridCache
+from .caching import (
+    CacheFactory,
+    DefaultHybridCache,
+    DefaultLocalCache,
+    DefaultRemoteCache,
+)
 
 if TYPE_CHECKING:
     from .health import HealthManager
@@ -49,9 +54,12 @@ class SmartProducer(ConfluentProducer):  # type: ignore[misc]
                 - 'smart.cache.ttl.ms': int (default: 300000, 5 minutes)
                 - 'smart.cache.max.size': int (default: 1000, max cache entries)
                 - 'smart.health.check.enabled': bool (default: True)
+                - 'smart.cache.type': str (default: "hybrid")
+                  Options: "local", "remote", "hybrid"
             health_manager: Optional health manager for partition health queries
             enable_redis: Enable Redis remote cache (ignored if cache provided)
-            cache: Optional pre-configured cache instance (overrides enable_redis)
+            cache: Optional pre-configured cache instance
+                (overrides enable_redis and cache.type)
         """
         # Extract smart producer specific config
         smart_config = self._extract_smart_config(config)
@@ -62,15 +70,38 @@ class SmartProducer(ConfluentProducer):  # type: ignore[misc]
         # Initialize smart producer components
         self._health_manager = health_manager if smart_config["enabled"] else None
 
-        # Use provided cache or create one
-        self._key_cache: Optional[DefaultHybridCache]
+        # Use provided cache or create one based on cache type
+        self._key_cache: Optional[
+            Union[DefaultLocalCache, DefaultRemoteCache, DefaultHybridCache]
+        ]
         if smart_config["enabled"]:
             if cache is not None:
                 self._key_cache = cache
             else:
-                self._key_cache = CacheFactory.create_hybrid_cache(
-                    smart_config, enable_redis
-                )
+                # Create cache based on configured type
+                cache_type = smart_config["cache_type"]
+                if cache_type == "local":
+                    self._key_cache = CacheFactory.create_local_cache(smart_config)
+                elif cache_type == "remote":
+                    remote_cache = CacheFactory.create_remote_cache(smart_config)
+                    if remote_cache is None:
+                        logger.warning(
+                            "Remote cache creation failed, falling back to local cache"
+                        )
+                        self._key_cache = CacheFactory.create_local_cache(smart_config)
+                    else:
+                        self._key_cache = remote_cache
+                elif cache_type == "hybrid":
+                    self._key_cache = CacheFactory.create_hybrid_cache(
+                        smart_config, enable_redis
+                    )
+                else:
+                    logger.warning(
+                        f"Unknown cache type '{cache_type}', falling back to hybrid"
+                    )
+                    self._key_cache = CacheFactory.create_hybrid_cache(
+                        smart_config, enable_redis
+                    )
         else:
             self._key_cache = None
         self._cache_ttl_ms = smart_config["cache_ttl_ms"]
@@ -95,6 +126,9 @@ class SmartProducer(ConfluentProducer):  # type: ignore[misc]
             "cache_ttl_ms": config.pop("smart.cache.ttl.ms", 300000),
             "cache_max_size": config.pop("smart.cache.max.size", 1000),
             "health_check_enabled": config.pop("smart.health.check.enabled", True),
+            # Cache type selection
+            # Cache type: "local", "remote", "hybrid"
+            "cache_type": config.pop("smart.cache.type", "hybrid"),
             # Redis settings
             "redis_host": config.pop("smart.cache.redis.host", "localhost"),
             "redis_port": config.pop("smart.cache.redis.port", 6379),

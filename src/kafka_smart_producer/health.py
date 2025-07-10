@@ -12,12 +12,11 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, Union
 
-from .caching import CacheConfig, DefaultLocalCache
+from .caching import CacheFactory, DefaultLocalCache
 from .exceptions import (
     HealthCalculationError,
     HealthManagerError,
     LagDataUnavailableError,
-    PartitionSelectionError,
 )
 from .protocols import CacheBackend, HotPartitionCalculator, LagDataCollector
 from .threading import (
@@ -120,13 +119,18 @@ class DefaultHealthManager:
 
         self._lag_collector = lag_collector
         self._health_calculator = health_calculator
-        self._cache = cache or DefaultLocalCache(
-            CacheConfig(
-                local_max_size=1000,
-                local_default_ttl_seconds=300.0,
-                stats_collection_enabled=False,  # No stats needed
-            )
-        )
+        # Use CacheFactory for consistent cache creation
+        self._cache: Union[DefaultLocalCache, CacheBackend]
+        if cache is None:
+            # Create default local cache with health manager specific config
+            default_config = {
+                "cache_max_size": 1000,
+                "cache_ttl_ms": 300000,  # 5 minutes
+                "ordered_message_ttl": 3600.0,  # 1 hour
+            }
+            self._cache = CacheFactory.create_local_cache(default_config)
+        else:
+            self._cache = cache
         self._config = config or HealthManagerConfig()
         self._explicit_async_mode = explicit_async_mode
 
@@ -417,12 +421,19 @@ class DefaultHealthManager:
                 self._topic_metadata[topic] = topic_health
 
             # Cache for quick access if cache supports it
+            # Cache the health data if supported
             if hasattr(self._cache, "set"):
                 try:
                     cache_key = f"topic_health:{topic}"
-                    self._cache.set(
-                        cache_key, topic_health, int(self._config.cache_ttl_seconds)
-                    )
+                    # Use sync version for local cache, avoid async in sync context
+                    if isinstance(self._cache, DefaultLocalCache):
+                        self._cache.set(
+                            cache_key, topic_health, self._config.cache_ttl_seconds
+                        )
+                    elif hasattr(self._cache, "set_sync"):
+                        self._cache.set_sync(
+                            cache_key, topic_health, int(self._config.cache_ttl_seconds)
+                        )
                 except Exception as e:
                     logger.debug(f"Cache set failed for {topic}: {e}")
 
@@ -466,9 +477,9 @@ class DefaultHealthManager:
 
 
 # Exception classes specific to health management
-class NoHealthyPartitionsError(PartitionSelectionError):
-    """Raised when no healthy partitions are available for selection."""
+# class NoHealthyPartitionsError(PartitionSelectionError):
+#     """Raised when no healthy partitions are available for selection."""
 
 
-class HealthRefreshError(HealthManagerError):
-    """Raised when health data refresh fails."""
+# class HealthRefreshError(HealthManagerError):
+#     """Raised when health data refresh fails."""
