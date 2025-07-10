@@ -78,9 +78,9 @@ class TestSmartProducerHybridCache:
         stats = producer.get_cache_stats()
 
         assert stats["enabled"] is True
-        assert "local_cache" in stats
-        assert "remote_cache" in stats
-        assert stats["remote_cache"]["enabled"] is False
+        assert "local_size" in stats
+        assert "remote_available" in stats
+        assert stats["remote_available"] is False
         assert stats["cache_ttl_ms"] == 30000
 
     def test_cache_operations_with_hybrid_cache(self):

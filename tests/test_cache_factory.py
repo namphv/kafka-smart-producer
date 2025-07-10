@@ -26,7 +26,6 @@ class TestCacheFactory:
         assert cache._config.local_max_size == 100
         assert cache._config.local_default_ttl_seconds == 60.0
         assert cache._config.ordered_message_ttl == 3600.0
-        assert cache._config.stats_collection_enabled is True
 
         # Test basic operations
         cache.set("test_key", 42)

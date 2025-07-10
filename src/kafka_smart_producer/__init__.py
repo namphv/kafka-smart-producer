@@ -15,8 +15,6 @@ from .caching import (
     CacheConfig,
     CacheEntry,
     CacheFactory,
-    CacheLevel,
-    CacheStats,
     CacheTimeoutError,
     CacheUnavailableError,
     DefaultHybridCache,
@@ -87,8 +85,6 @@ __all__ = [
     "CacheConfig",
     "CacheEntry",
     "CacheFactory",
-    "CacheLevel",
-    "CacheStats",
     "CacheTimeoutError",
     "CacheUnavailableError",
     # Threading utilities
@@ -103,7 +99,6 @@ __all__ = [
     "PartitionHealth",
     "TopicHealth",
     # Removed PartitionSelectionStrategy
-    "NoHealthyPartitionsError",
     # Producer classes
     "SmartProducer",
     "AsyncSmartProducer",

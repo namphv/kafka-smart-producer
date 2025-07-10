@@ -132,9 +132,8 @@ class TestHybridCacheIntegration:
         # Test cache stats
         stats = producer.get_cache_stats()
         assert stats["enabled"] is True
-        assert "local_cache" in stats
-        assert "remote_cache" in stats
-        assert stats["remote_cache"]["enabled"] is False
+        assert "local_size" in stats
+        assert stats["remote_available"] is False
 
     def test_cache_key_format(self):
         """Test that cache keys are formatted correctly."""

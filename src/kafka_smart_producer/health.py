@@ -474,12 +474,3 @@ class DefaultHealthManager:
                 logger.debug(f"Cleaning up stale data for topic: {topic}")
                 self._topic_metadata.pop(topic, None)
                 self._failure_counts.pop(topic, None)
-
-
-# Exception classes specific to health management
-# class NoHealthyPartitionsError(PartitionSelectionError):
-#     """Raised when no healthy partitions are available for selection."""
-
-
-# class HealthRefreshError(HealthManagerError):
-#     """Raised when health data refresh fails."""

@@ -267,35 +267,21 @@ class SmartProducer(ConfluentProducer):  # type: ignore[misc]
         if not self._key_cache:
             return {"enabled": False}
 
-        # Hybrid cache system with stats
-        if hasattr(self._key_cache, "get_combined_stats"):
-            combined_stats = self._key_cache.get_combined_stats()
+        # Simplified cache info without detailed stats
+        cache_info = {"enabled": True, "cache_ttl_ms": self._cache_ttl_ms}
 
-            return {
-                "enabled": True,
-                "cache_ttl_ms": self._cache_ttl_ms,
-                "local_cache": {
-                    "size": combined_stats["local"].hits_local
-                    + combined_stats["local"].misses,
-                    "hit_ratio": combined_stats["local"].get_hit_ratio(),
-                    "avg_latency_ms": combined_stats["local"].get_avg_latency_ms(),
-                },
-                "remote_cache": (
-                    {
-                        "enabled": self._key_cache.is_remote_available(),
-                        "stats": combined_stats.get("remote"),
-                    }
-                    if "remote" in combined_stats
-                    else {"enabled": False}
-                ),
-            }
+        # Try to get basic size information
+        if hasattr(self._key_cache, "size"):
+            cache_info["size"] = self._key_cache.size()
+        elif hasattr(self._key_cache, "_local") and hasattr(
+            self._key_cache._local, "size"
+        ):
+            cache_info["local_size"] = self._key_cache._local.size()
+            cache_info["remote_available"] = self._key_cache.is_remote_available()
         else:
-            # Fallback for caches without detailed stats
-            return {
-                "enabled": True,
-                "cache_ttl_ms": self._cache_ttl_ms,
-                "simple_stats": "Cache stats not available",
-            }
+            cache_info["info"] = "Basic cache active"
+
+        return cache_info
 
     def clear_cache(self) -> None:
         """Clear the key-to-partition cache safely."""
