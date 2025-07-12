@@ -11,6 +11,7 @@ from unittest.mock import Mock, call, patch
 import pytest
 
 from kafka_smart_producer.async_producer import AsyncSmartProducer
+from kafka_smart_producer.producer_config import ProducerConfig
 from kafka_smart_producer.sync_producer import SmartProducer
 
 
@@ -20,11 +21,13 @@ class TestSyncProducerMessageDelivery:
     @pytest.fixture
     def basic_config(self):
         """Basic configuration without health manager."""
-        return {
-            "bootstrap.servers": "localhost:9092",
-            "topics": ["test-topic"],
-            "smart_enabled": False,  # Disable smart features for simpler testing
-        }
+        return ProducerConfig.from_dict(
+            {
+                "bootstrap.servers": "localhost:9092",
+                "topics": ["test-topic"],
+                "smart_enabled": False,  # Disable smart features for simpler testing
+            }
+        )
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
     def test_produce_calls_flush_immediately(
@@ -145,11 +148,13 @@ class TestAsyncProducerMessageDelivery:
     @pytest.fixture
     def basic_config(self):
         """Basic configuration without health manager."""
-        return {
-            "bootstrap.servers": "localhost:9092",
-            "topics": ["test-topic"],
-            "smart_enabled": False,
-        }
+        return ProducerConfig.from_dict(
+            {
+                "bootstrap.servers": "localhost:9092",
+                "topics": ["test-topic"],
+                "smart_enabled": False,
+            }
+        )
 
     @patch("kafka_smart_producer.async_producer.ConfluentProducer")
     async def test_produce_calls_poll_and_waits_for_delivery(
@@ -386,11 +391,13 @@ class TestDeliveryBehaviorComparison:
 
     @pytest.fixture
     def config(self):
-        return {
-            "bootstrap.servers": "localhost:9092",
-            "topics": ["test-topic"],
-            "smart_enabled": False,
-        }
+        return ProducerConfig.from_dict(
+            {
+                "bootstrap.servers": "localhost:9092",
+                "topics": ["test-topic"],
+                "smart_enabled": False,
+            }
+        )
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
     def test_sync_guarantees_immediate_delivery(self, mock_confluent_producer, config):

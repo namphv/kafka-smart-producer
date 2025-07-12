@@ -21,23 +21,20 @@ class TestSmartProducerIntegration:
     @pytest.fixture
     def basic_config(self):
         """Basic producer configuration."""
-        return {
-            "bootstrap.servers": "localhost:9092",
-            "topics": ["test-topic"],
-            "health_manager": {"consumer_group": "test-consumers"},
-            "cache": {"local_max_size": 100},
-            "smart_enabled": True,
-            "key_stickiness": True,
-        }
-
-    @pytest.fixture
-    def producer_config(self, basic_config):
-        """ProducerConfig instance."""
-        return ProducerConfig.from_dict(basic_config)
+        return ProducerConfig.from_dict(
+            {
+                "bootstrap.servers": "localhost:9092",
+                "topics": ["test-topic"],
+                "health_manager": {"consumer_group": "test-consumers"},
+                "cache": {"local_max_size": 100},
+                "smart_enabled": True,
+                "key_stickiness": True,
+            }
+        )
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
     def test_sync_producer_initialization_with_config(
-        self, mock_confluent_producer, producer_config
+        self, mock_confluent_producer, basic_config
     ):
         """Test sync producer initialization with ProducerConfig."""
         mock_producer_instance = Mock()
@@ -49,7 +46,7 @@ class TestSmartProducerIntegration:
             mock_health_manager = Mock()
             mock_health_manager_class.return_value = mock_health_manager
 
-            producer = SmartProducer(producer_config)
+            producer = SmartProducer(basic_config)
 
             # Should create confluent producer with clean config
             mock_confluent_producer.assert_called_once()
@@ -64,7 +61,7 @@ class TestSmartProducerIntegration:
 
     @patch("kafka_smart_producer.async_producer.ConfluentProducer")
     def test_async_producer_initialization_with_config(
-        self, mock_confluent_producer, producer_config
+        self, mock_confluent_producer, basic_config
     ):
         """Test async producer initialization with ProducerConfig."""
         mock_producer_instance = Mock()
@@ -76,7 +73,7 @@ class TestSmartProducerIntegration:
             mock_health_manager = Mock()
             mock_health_manager_class.return_value = mock_health_manager
 
-            producer = AsyncSmartProducer(producer_config)
+            producer = AsyncSmartProducer(basic_config)
 
             # Should create confluent producer with clean config
             mock_confluent_producer.assert_called_once()
@@ -200,11 +197,13 @@ class TestSmartProducerIntegration:
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
     def test_sync_producer_disabled_smart_partitioning(self, mock_confluent_producer):
         """Test sync producer with smart partitioning disabled."""
-        config = {
-            "bootstrap.servers": "localhost:9092",
-            "topics": ["test-topic"],
-            "smart_enabled": False,
-        }
+        config = ProducerConfig.from_dict(
+            {
+                "bootstrap.servers": "localhost:9092",
+                "topics": ["test-topic"],
+                "smart_enabled": False,
+            }
+        )
 
         mock_producer_instance = Mock()
         mock_confluent_producer.return_value = mock_producer_instance
@@ -286,13 +285,15 @@ class TestSmartProducerIntegration:
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
     def test_sync_producer_no_key_stickiness(self, mock_confluent_producer):
         """Test sync producer with key stickiness disabled."""
-        config = {
-            "bootstrap.servers": "localhost:9092",
-            "topics": ["test-topic"],
-            "health_manager": {"consumer_group": "test-consumers"},
-            "smart_enabled": True,
-            "key_stickiness": False,
-        }
+        config = ProducerConfig.from_dict(
+            {
+                "bootstrap.servers": "localhost:9092",
+                "topics": ["test-topic"],
+                "health_manager": {"consumer_group": "test-consumers"},
+                "smart_enabled": True,
+                "key_stickiness": False,
+            }
+        )
 
         mock_producer_instance = Mock()
         mock_confluent_producer.return_value = mock_producer_instance

@@ -5,16 +5,12 @@ This module implements comprehensive tests for all protocol interfaces,
 including mock implementations, edge cases, and performance validation.
 """
 
-import math
 import time
 from typing import Any, Dict, Optional
 
 import pytest
 
-from kafka_smart_producer.exceptions import (
-    HealthCalculationError,
-    LagDataUnavailableError,
-)
+from kafka_smart_producer.exceptions import LagDataUnavailableError
 from kafka_smart_producer.protocols import LagDataCollector
 
 
@@ -58,85 +54,6 @@ class MockLagDataCollector:
     def set_health(self, healthy: bool) -> None:
         """Test helper to change health status."""
         self._is_healthy = healthy
-
-    def get_call_count(self) -> int:
-        """Test helper to verify call patterns."""
-        return self._call_count
-
-
-class MockHotPartitionCalculator:
-    """
-    Mock implementation of HotPartitionCalculator for testing.
-
-    Implements configurable scoring logic with edge case handling.
-    """
-
-    def __init__(self, score_fn=None, threshold: int = 1000):
-        """
-        Initialize with custom scoring function or default threshold-based logic.
-
-        Args:
-            score_fn: Custom function (lag) -> score, or None for default
-            threshold: Lag threshold for default scoring
-        """
-        self._threshold = threshold
-        self._score_fn = score_fn or self._default_score_fn
-        self._call_count = 0
-
-    def _default_score_fn(self, lag: int) -> float:
-        """Default scoring: linear decay from 1.0 to 0.0 at threshold."""
-        if lag <= 0:
-            return 1.0
-        return max(0.0, 1.0 - lag / self._threshold)
-
-    def calculate_scores(
-        self, lag_data: Dict[int, int], metadata: Optional[Dict[str, Any]] = None
-    ) -> Dict[int, float]:
-        """Calculate health scores with edge case handling."""
-        self._call_count += 1
-
-        # Handle empty data gracefully
-        if not lag_data:
-            return {}
-
-        scores = {}
-        for partition, lag in lag_data.items():
-            # Validate input
-            if not isinstance(partition, int) or partition < 0:
-                raise HealthCalculationError(
-                    f"Invalid partition ID: {partition}",
-                    context={"partition": partition, "lag": lag},
-                )
-
-            if not isinstance(lag, int) or lag < 0:
-                raise HealthCalculationError(
-                    f"Invalid lag value: {lag}",
-                    context={"partition": partition, "lag": lag},
-                )
-
-            # Calculate score
-            score = self._score_fn(lag)
-
-            # Ensure score is bounded [0.0, 1.0] and not NaN/infinite
-            if math.isnan(score) or math.isinf(score):
-                raise HealthCalculationError(
-                    f"Invalid score calculated: {score}",
-                    context={"partition": partition, "lag": lag, "score": score},
-                )
-
-            scores[partition] = max(0.0, min(1.0, score))
-
-        return scores
-
-    def get_threshold_config(self) -> Dict[str, Any]:
-        """Return current configuration for debugging."""
-        return {
-            "threshold": self._threshold,
-            "call_count": self._call_count,
-            "score_function": (
-                "custom" if self._score_fn != self._default_score_fn else "default"
-            ),
-        }
 
     def get_call_count(self) -> int:
         """Test helper to verify call patterns."""
@@ -303,76 +220,6 @@ class TestLagDataCollector:
         assert collector.is_healthy() is False
 
 
-class TestHotPartitionCalculator:
-    """Test scenarios for HotPartitionCalculator protocol."""
-
-    def test_normal_health_score_calculation(self):
-        """Scenario 1: Normal health score calculation."""
-        calculator = MockHotPartitionCalculator(threshold=1000)
-        lag_data = {0: 100, 1: 500, 2: 1500}
-
-        scores = calculator.calculate_scores(lag_data)
-
-        # Verify scores are between 0.0 and 1.0
-        for score in scores.values():
-            assert 0.0 <= score <= 1.0
-
-        # Verify higher lag results in lower health score
-        assert scores[0] > scores[1]  # 100 lag > 500 lag
-        assert scores[1] > scores[2]  # 500 lag > 1500 lag
-
-        # Verify all partitions have scores assigned
-        assert set(scores.keys()) == set(lag_data.keys())
-
-    def test_empty_lag_data_handling(self):
-        """Scenario 2: Empty lag data handling."""
-        calculator = MockHotPartitionCalculator()
-
-        scores = calculator.calculate_scores({})
-
-        assert scores == {}
-        # Verify no exceptions raised
-
-    def test_extreme_lag_values(self):
-        """Scenario 3: Extreme lag values."""
-        calculator = MockHotPartitionCalculator(threshold=1000)
-        lag_data = {
-            0: 0,  # Zero lag
-            1: 1000000,  # Very high lag (>1M)
-            2: 2**31 - 1,  # Max int32
-        }
-
-        scores = calculator.calculate_scores(lag_data)
-
-        # Verify scores are valid (not NaN or infinite)
-        for score in scores.values():
-            assert not math.isnan(score)
-            assert not math.isinf(score)
-            assert 0.0 <= score <= 1.0
-
-    def test_invalid_input_handling(self):
-        """Test invalid input validation."""
-        calculator = MockHotPartitionCalculator()
-
-        # Invalid partition ID
-        with pytest.raises(HealthCalculationError):
-            calculator.calculate_scores({-1: 100})
-
-        # Invalid lag value
-        with pytest.raises(HealthCalculationError):
-            calculator.calculate_scores({0: -50})
-
-    def test_configuration_access(self):
-        """Test configuration debugging interface."""
-        calculator = MockHotPartitionCalculator(threshold=2000)
-
-        config = calculator.get_threshold_config()
-
-        assert isinstance(config, dict)
-        assert "threshold" in config
-        assert config["threshold"] == 2000
-
-
 class TestCacheBackend:
     """Test scenarios for CacheBackend protocol."""
 
@@ -485,7 +332,6 @@ class TestProtocolCompliance:
     def test_exception_hierarchy(self):
         """Test exception class hierarchy and context."""
         from kafka_smart_producer.exceptions import (
-            HealthCalculationError,
             LagDataUnavailableError,
             SmartProducerError,
         )
@@ -500,4 +346,3 @@ class TestProtocolCompliance:
 
         # Test inheritance
         assert issubclass(LagDataUnavailableError, SmartProducerError)
-        assert issubclass(HealthCalculationError, SmartProducerError)

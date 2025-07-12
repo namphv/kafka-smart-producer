@@ -56,7 +56,7 @@ def create_cache_from_config(config: "ProducerConfig") -> Optional[CacheType]:
 
     elif cache_mode == "remote":
         logger.debug("Creating remote cache")
-        legacy_config = {
+        redis_config = {
             "redis_host": cache_config.redis_host,
             "redis_port": cache_config.redis_port,
             "redis_db": cache_config.redis_db,
@@ -64,7 +64,7 @@ def create_cache_from_config(config: "ProducerConfig") -> Optional[CacheType]:
             "redis_ssl_enabled": cache_config.redis_ssl_enabled,
             "redis_ttl_seconds": int(cache_config.remote_default_ttl_seconds),
         }
-        remote_cache = CacheFactory.create_remote_cache(legacy_config)
+        remote_cache = CacheFactory.create_remote_cache(redis_config)
         if remote_cache is None:
             raise RuntimeError(
                 f"Failed to create remote cache. Check Redis configuration: "
@@ -75,7 +75,7 @@ def create_cache_from_config(config: "ProducerConfig") -> Optional[CacheType]:
 
     elif cache_mode == "hybrid":
         logger.debug("Creating hybrid cache")
-        legacy_config = {
+        hybrid_config = {
             "cache_max_size": cache_config.local_max_size,
             "cache_ttl_ms": int(cache_config.local_default_ttl_seconds * 1000),
             "redis_host": cache_config.redis_host,
@@ -86,7 +86,7 @@ def create_cache_from_config(config: "ProducerConfig") -> Optional[CacheType]:
             "redis_ttl_seconds": int(cache_config.remote_default_ttl_seconds),
         }
         hybrid_cache = CacheFactory.create_hybrid_cache(
-            legacy_config, enable_redis=True
+            hybrid_config, enable_redis=True
         )
         if hybrid_cache is None:
             raise RuntimeError(

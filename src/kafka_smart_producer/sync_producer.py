@@ -6,11 +6,10 @@ selection based on consumer health monitoring.
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from confluent_kafka import Producer as ConfluentProducer
 
-from .factories import CacheFactory
 from .producer_config import ProducerConfig
 from .producer_utils import BasePartitionSelector
 
@@ -30,23 +29,20 @@ class SmartProducer:
 
     def __init__(
         self,
-        config: Union[ProducerConfig, Dict[str, Any]],
+        config: ProducerConfig,
         health_manager: Optional["SyncHealthManager"] = None,
     ) -> None:
         """
         Initialize the Smart Producer.
 
         Args:
-            config: Producer configuration (ProducerConfig or legacy dict)
+            config: Producer configuration
             health_manager: Optional explicit health manager (overrides config)
         """
-        # Convert legacy dict config to ProducerConfig
-        if isinstance(config, dict):
-            self._config = ProducerConfig.from_dict(config)
-        elif isinstance(config, ProducerConfig):
-            self._config = config
-        else:
-            raise ValueError("config must be ProducerConfig instance or dict")
+        if not isinstance(config, ProducerConfig):
+            raise ValueError("config must be ProducerConfig instance")
+
+        self._config = config
 
         # Create underlying confluent-kafka producer
         kafka_config = self._config.get_clean_kafka_config()
@@ -98,28 +94,9 @@ class SmartProducer:
 
     def _create_cache(self):
         """Create cache from config."""
-        cache_config = self._config.cache_config
+        from .producer_utils import create_cache_from_config
 
-        if cache_config.remote_enabled:
-            # Create hybrid cache
-            legacy_config = {
-                "cache_max_size": cache_config.local_max_size,
-                "cache_ttl_ms": int(cache_config.local_default_ttl_seconds * 1000),
-                "redis_host": cache_config.redis_host,
-                "redis_port": cache_config.redis_port,
-                "redis_db": cache_config.redis_db,
-                "redis_password": cache_config.redis_password,
-                "redis_ssl_enabled": cache_config.redis_ssl_enabled,
-                "redis_ttl_seconds": int(cache_config.remote_default_ttl_seconds),
-            }
-            return CacheFactory.create_hybrid_cache(legacy_config, enable_redis=True)
-        else:
-            # Create local cache only
-            legacy_config = {
-                "cache_max_size": cache_config.local_max_size,
-                "cache_ttl_ms": int(cache_config.local_default_ttl_seconds * 1000),
-            }
-            return CacheFactory.create_local_cache(legacy_config)
+        return create_cache_from_config(self._config)
 
     def produce(
         self,

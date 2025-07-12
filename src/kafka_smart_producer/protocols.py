@@ -57,63 +57,6 @@ class LagDataCollector(Protocol):
         ...
 
 
-class HotPartitionCalculator(Protocol):
-    """
-    Protocol for calculating partition health scores from lag data.
-
-    DEPRECATED: The new simplified HealthManager includes built-in
-    health calculation. This protocol is kept for backward compatibility.
-
-    Implementations define the logic for converting raw lag metrics into
-    normalized health scores that guide partition selection.
-
-    Threading Considerations:
-    - Should be CPU-bound and thread-safe
-    - All methods are synchronous for simplicity
-    - Must handle concurrent access safely
-    """
-
-    @abstractmethod
-    def calculate_scores(
-        self, lag_data: Dict[int, int], metadata: Optional[Dict[str, Any]] = None
-    ) -> Dict[int, float]:
-        """
-        Calculate health scores for partitions based on lag data.
-
-        Higher lag should result in lower health scores.
-        Must handle edge cases gracefully (empty data, extreme values).
-
-        Args:
-            lag_data: Partition lag counts from LagDataCollector
-                     - Keys: partition_id (non-negative int)
-                     - Values: lag_count (non-negative int)
-            metadata: Optional additional context (broker metrics, etc.)
-                     - Can include broker health, throughput metrics, etc.
-
-        Returns:
-            Dict mapping partition_id -> health_score
-            - health_score: Float in range [0.0, 1.0]
-            - 1.0 = healthy (low lag)
-            - 0.0 = unhealthy (high lag)
-            - Must not return NaN or infinite values
-
-        Raises:
-            HealthCalculationError: When score calculation fails
-        """
-        ...
-
-    @abstractmethod
-    def get_threshold_config(self) -> Dict[str, Any]:
-        """
-        Return current threshold configuration for debugging.
-
-        Returns:
-            Dict containing current configuration parameters
-            Used for diagnostics and health monitoring
-        """
-        ...
-
-
 class CacheBackend(Protocol):
     """
     Protocol for cache backend implementations.

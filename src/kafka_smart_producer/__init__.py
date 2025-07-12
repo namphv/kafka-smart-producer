@@ -35,7 +35,6 @@ from .caching import (
 from .exceptions import (
     CacheError,
     ConfigurationError,
-    HealthCalculationError,
     HealthManagerError,
     LagDataUnavailableError,
     PartitionSelectionError,
@@ -47,7 +46,7 @@ from .health_config import HealthManagerConfig
 from .producer_config import ProducerConfig
 
 # Core protocol interfaces
-from .protocols import CacheBackend, HotPartitionCalculator, LagDataCollector
+from .protocols import CacheBackend, LagDataCollector
 from .sync_health_manager import SyncHealthManager
 from .sync_producer import SmartProducer
 
@@ -66,12 +65,10 @@ from .sync_producer import SmartProducer
 __all__ = [
     # Protocols
     "LagDataCollector",
-    "HotPartitionCalculator",
     "CacheBackend",
     # Exceptions
     "SmartProducerError",
     "LagDataUnavailableError",
-    "HealthCalculationError",
     "HealthManagerError",
     "CacheError",
     "PartitionSelectionError",

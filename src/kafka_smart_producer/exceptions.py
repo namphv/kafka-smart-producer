@@ -41,21 +41,6 @@ class LagDataUnavailableError(SmartProducerError):
     """
 
 
-class HealthCalculationError(SmartProducerError):
-    """
-    Raised when health score calculation fails.
-
-    This indicates an error in the HotPartitionCalculator logic,
-    such as invalid input data, configuration errors, or
-    computational failures.
-
-    Usage:
-        - Log calculation parameters for debugging
-        - Fall back to neutral health scores (0.5)
-        - Alert on persistent calculation failures
-    """
-
-
 class HealthManagerError(SmartProducerError):
     """Raised when health management operations fail."""
 
