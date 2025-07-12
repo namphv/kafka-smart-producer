@@ -1,11 +1,10 @@
 """
-Hybrid caching system for Kafka Smart Producer.
+Sync-only caching system for Kafka Smart Producer.
 
 This module provides local and remote cache implementations
 with read-through patterns for partition health data caching.
 """
 
-import asyncio
 import logging
 import threading
 import time
@@ -51,108 +50,65 @@ class LocalCache(Protocol):
         """Delete key from local cache."""
         ...
 
-    def clear(self) -> None:
-        """Clear all entries from local cache."""
-        ...
-
-    def size(self) -> int:
-        """Get current number of entries in cache."""
-        ...
-
 
 class RemoteCache(Protocol):
     """Distributed cache interface (Redis-based)."""
 
-    async def get(self, key: str) -> Optional[Any]:
-        """Get value from remote cache asynchronously."""
+    def get(self, key: str) -> Optional[Any]:
+        """Get value from remote cache."""
         ...
 
-    def get_sync(self, key: str) -> Optional[Any]:
-        """Get value from remote cache synchronously."""
-        ...
-
-    async def set(
-        self, key: str, value: Any, ttl_seconds: Optional[float] = None
-    ) -> None:
+    def set(self, key: str, value: Any, ttl_seconds: Optional[float] = None) -> None:
         """Set value in remote cache with optional TTL."""
         ...
 
-    def set_sync(
-        self, key: str, value: Any, ttl_seconds: Optional[float] = None
-    ) -> None:
-        """Set value in remote cache synchronously."""
-        ...
-
-    async def delete(self, key: str) -> None:
+    def delete(self, key: str) -> None:
         """Delete key from remote cache."""
         ...
 
-    def delete_sync(self, key: str) -> None:
-        """Delete key from remote cache synchronously."""
-        ...
-
-    async def ping(self) -> bool:
+    def ping(self) -> bool:
         """Check if remote cache is available."""
-        ...
-
-    def ping_sync(self) -> bool:
-        """Check if remote cache is available synchronously."""
         ...
 
 
 class HybridCache(Protocol):
     """Combined local + remote cache with read-through pattern."""
 
-    async def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Optional[Any]:
         """
         Get value using read-through pattern: local -> remote -> None.
         Updates local on remote hit.
         """
         ...
 
-    def get_sync(self, key: str) -> Optional[Any]:
-        """Synchronous version of get() for sync contexts."""
-        ...
-
-    async def set(
-        self, key: str, value: Any, ttl_seconds: Optional[float] = None
-    ) -> None:
+    def set(self, key: str, value: Any, ttl_seconds: Optional[float] = None) -> None:
         """Set value in both local and remote caches."""
         ...
 
-    def set_sync(
-        self, key: str, value: Any, ttl_seconds: Optional[float] = None
-    ) -> None:
-        """Synchronous version of set()."""
-        ...
-
-    async def delete(self, key: str) -> None:
+    def delete(self, key: str) -> None:
         """Delete key from both local and remote caches."""
         ...
 
-    def delete_sync(self, key: str) -> None:
-        """Synchronous version of delete()."""
-        ...
 
-
-@dataclass
+@dataclass(frozen=True)
 class CacheConfig:
     """Configuration for cache behavior."""
-
-    # Message-type specific TTLs
-    ordered_message_ttl: float = (
-        3600.0  # 1 hour for consistency (only for ordered messages)
-    )
 
     # Local cache settings
     local_max_size: int = 1000
     local_default_ttl_seconds: float = 300.0
 
     # Remote cache settings
-    remote_enabled: bool = True
+    remote_enabled: bool = False
     remote_default_ttl_seconds: float = 900.0
 
-    # Redis security settings (optional)
+    # Redis connection settings
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_db: int = 0
+    redis_password: Optional[str] = None
+
+    # Redis security settings
     redis_ssl_enabled: bool = False
     redis_ssl_cert_reqs: str = "required"
     redis_ssl_ca_certs: Optional[str] = None
@@ -167,8 +123,10 @@ class CacheConfig:
             raise ValueError("local_default_ttl_seconds must be positive")
         if self.remote_default_ttl_seconds <= 0:
             raise ValueError("remote_default_ttl_seconds must be positive")
-        if self.ordered_message_ttl <= 0:
-            raise ValueError("ordered_message_ttl must be positive")
+        if self.redis_port <= 0 or self.redis_port > 65535:
+            raise ValueError("redis_port must be between 1 and 65535")
+        if self.redis_db < 0:
+            raise ValueError("redis_db must be non-negative")
 
 
 class DefaultLocalCache:
@@ -220,210 +178,85 @@ class DefaultLocalCache:
                 # Key doesn't exist - silently ignore
                 pass
 
-    def clear(self) -> None:
-        with self._lock:
-            self._cache.clear()
-
-    def size(self) -> int:
-        with self._lock:
-            return len(self._cache)
-
-    # Removed manual LRU node management methods - cachetools.LRUCache handles this
-
-    # Compatibility methods for unified cache interface
-    def get_sync(self, key: str) -> Optional[Any]:
-        """Synchronous get (same as get for local cache)."""
-        return self.get(key)
-
-    def delete_sync(self, key: str) -> None:
-        """Synchronous delete (same as delete for local cache)."""
-        self.delete(key)
-
-    def set_with_ordered_ttl(self, key: str, value: Any) -> None:
-        """Set value with TTL for ordered messages."""
-        # Use default TTL for local cache
-        self.set(key, value, self._config.local_default_ttl_seconds)
-
 
 class DefaultHybridCache:
-    """Enhanced hybrid cache with local and remote cache support."""
+    """Hybrid cache with local and remote cache - remote is required."""
 
     def __init__(
         self,
         local_cache: LocalCache,
-        remote_cache: Optional[RemoteCache],
+        remote_cache: RemoteCache,  # Required, not Optional
         config: CacheConfig,
     ):
+        if remote_cache is None:
+            raise ValueError("Hybrid cache requires a remote cache instance")
+
         self._local = local_cache
         self._remote = remote_cache
         self._config = config
-        self._remote_available = True
-        self._last_remote_check = 0.0
 
-    async def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Optional[Any]:
         """Read-through cache lookup: local -> remote -> None."""
         # Try local first
         value = self._local.get(key)
         if value is not None:
             return value
 
-        # Try remote if available
-        if self._is_remote_enabled() and self._remote is not None:
-            try:
-                value = await self._remote.get(key)
-                if value is not None:
-                    # Promote to local
-                    self._local.set(key, value, self._config.local_default_ttl_seconds)
-                    return value
-            except Exception:
-                self._mark_remote_unavailable()
-                # Continue to return None
-
-        return None
-
-    def get_sync(self, key: str) -> Optional[Any]:
-        """Synchronous version of get()."""
-        # Try local first
-        value = self._local.get(key)
-        if value is not None:
-            return value
-
-        # Try remote if available
-        if self._is_remote_enabled() and self._remote is not None:
-            try:
-                value = self._remote.get_sync(key)
-                if value is not None:
-                    # Promote to local
-                    self._local.set(key, value, self._config.local_default_ttl_seconds)
-                    return value
-            except Exception:
-                self._mark_remote_unavailable()
-
-        return None
-
-    def set_with_ordered_ttl(self, key: str, value: Any) -> None:
-        """Set value with TTL for ordered messages (key stickiness)."""
-        ttl = self._config.ordered_message_ttl
-        self.set_sync(key, value, ttl)
-
-    async def set(
-        self, key: str, value: Any, ttl_seconds: Optional[float] = None
-    ) -> None:
-        """Set in both local and remote."""
-        # Always set in local
-        self._local.set(
-            key, value, ttl_seconds or self._config.local_default_ttl_seconds
-        )
-
-        # Set in remote if available
-        if self._is_remote_enabled() and self._remote is not None:
-            try:
-                await self._remote.set(
-                    key, value, ttl_seconds or self._config.remote_default_ttl_seconds
-                )
-            except Exception:
-                self._mark_remote_unavailable()
-                # Local set still succeeded
-
-    def set_sync(
-        self, key: str, value: Any, ttl_seconds: Optional[float] = None
-    ) -> None:
-        """Synchronous version of set()."""
-        # Always set in local
-        self._local.set(
-            key, value, ttl_seconds or self._config.local_default_ttl_seconds
-        )
-
-        # Set in remote if available
-        if self._is_remote_enabled() and self._remote is not None:
-            try:
-                self._remote.set_sync(
-                    key, value, ttl_seconds or self._config.remote_default_ttl_seconds
-                )
-            except Exception:
-                self._mark_remote_unavailable()
-
-    async def delete(self, key: str) -> None:
-        """Delete from both caches."""
-        self._local.delete(key)
-
-        if self._is_remote_enabled() and self._remote is not None:
-            try:
-                await self._remote.delete(key)
-            except Exception:
-                self._mark_remote_unavailable()
-
-    def delete_sync(self, key: str) -> None:
-        """Synchronous version of delete()."""
-        self._local.delete(key)
-
-        if self._is_remote_enabled() and self._remote is not None:
-            try:
-                self._remote.delete_sync(key)
-            except Exception:
-                self._mark_remote_unavailable()
-
-    def clear(self) -> None:
-        """Clear both local and remote caches safely."""
-        # Clear local cache
-        self._local.clear()
-
-        # Clear remote cache with app-specific pattern
-        if self._is_remote_enabled() and self._remote is not None:
-            try:
-                # Use app-specific prefix to avoid clearing other apps' data
-                app_pattern = "kafka_smart_producer:*"
-                if hasattr(self._remote, "delete_pattern_sync"):
-                    self._remote.delete_pattern_sync(app_pattern)
-                else:
-                    # Fallback for older implementations
-                    self._remote.delete_sync(app_pattern)
-            except Exception as e:
-                logger.warning(f"Failed to clear remote cache: {e}")
-
-    def is_remote_available(self) -> bool:
-        """Check current remote availability."""
-        return self._remote_available and self._remote is not None
-
-    def _is_remote_enabled(self) -> bool:
-        """Check if remote should be used."""
-        if not self._config.remote_enabled or self._remote is None:
-            return False
-
-        # Periodically check remote health if marked unavailable
-        now = time.time()
-        if not self._remote_available and (now - self._last_remote_check) > 30.0:
-            self._check_remote_health()
-
-        return self._remote_available
-
-    def _mark_remote_unavailable(self) -> None:
-        """Mark remote as unavailable due to error."""
-        self._remote_available = False
-        self._last_remote_check = time.time()
-
-    def _check_remote_health(self) -> None:
-        """Check if remote has recovered."""
+        # Try remote - fail fast on errors
         try:
-            if self._remote is not None and self._remote.ping_sync():
-                self._remote_available = True
+            value = self._remote.get(key)
+            if value is not None:
+                # Promote to local
+                self._local.set(key, value, self._config.local_default_ttl_seconds)
+                return value
         except Exception as e:
-            logger.debug(f"Remote health check failed: {e}")  # Remain unavailable
+            logger.warning(f"Remote cache get failed for key {key}: {e}")
+            # Let the exception bubble up - fail fast
 
-        self._last_remote_check = time.time()
+        return None
+
+    def set(self, key: str, value: Any, ttl_seconds: Optional[float] = None) -> None:
+        """Set in both local and remote - fail fast on remote errors."""
+        # Always set in local first
+        self._local.set(
+            key, value, ttl_seconds or self._config.local_default_ttl_seconds
+        )
+
+        # Set in remote - fail fast on errors
+        try:
+            self._remote.set(
+                key, value, ttl_seconds or self._config.remote_default_ttl_seconds
+            )
+        except Exception as e:
+            logger.warning(f"Remote cache set failed for key {key}: {e}")
+            # Let the exception bubble up - fail fast
+
+    def delete(self, key: str) -> None:
+        """Delete from both caches - fail fast on remote errors."""
+        # Always delete from local
+        self._local.delete(key)
+
+        # Delete from remote - fail fast on errors
+        try:
+            self._remote.delete(key)
+        except Exception as e:
+            logger.warning(f"Remote cache delete failed for key {key}: {e}")
+            # Let the exception bubble up - fail fast
 
 
 class DefaultRemoteCache:
-    """Redis-based remote cache implementation with async support and serialization."""
+    """Redis-based remote cache implementation with sync Redis client."""
 
-    def __init__(self, redis_client: Any):
+    def __init__(self, redis_client: Any, config: CacheConfig):
         """
-        Initialize with a pre-configured Redis client.
+        Initialize with a pre-configured sync Redis client.
 
         Args:
-            redis_client: Either redis.asyncio.Redis or redis.Redis instance
+            redis_client: redis.Redis instance (sync client)
+            config: Cache configuration
         """
         self._redis = redis_client
+        self._config = config
 
     def _serialize_value(self, value: Any) -> str:
         """Serialize value with optimization for integer partition IDs."""
@@ -448,158 +281,53 @@ class DefaultRemoteCache:
         except ValueError:
             return value
 
-    async def get(self, key: str) -> Optional[Any]:
-        """Get value from Redis asynchronously with optimized deserialization."""
+    def get(self, key: str) -> Optional[Any]:
+        """Get value from Redis with optimized deserialization."""
         if not self._redis:
             return None
 
         try:
-            value = await self._redis.get(key)
+            value = self._redis.get(key)
             if value is not None:
-                return self._deserialize_value(value)
-            else:
-                return None
-        except Exception:
+                return self._deserialize_value(value.decode("utf-8"))
+            return None
+        except Exception as e:
+            logger.debug(f"Failed to get cache key {key}: {e}")
             return None
 
-    def get_sync(self, key: str) -> Optional[Any]:
-        """Synchronous version of get() - delegates to async method."""
-        try:
-            return asyncio.run(self.get(key))
-        except RuntimeError:
-            # Fallback for when already in async context
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(self.get(key))
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-    async def set(
-        self, key: str, value: Any, ttl_seconds: Optional[float] = None
-    ) -> None:
-        """Set value in Redis asynchronously with optimized serialization."""
+    def set(self, key: str, value: Any, ttl_seconds: Optional[float] = None) -> None:
+        """Set value in Redis with optimized serialization."""
         if not self._redis:
             return
-
         try:
             serialized_value = self._serialize_value(value)
-
-            if ttl_seconds:
-                await self._redis.setex(key, int(ttl_seconds), serialized_value)
+            ttl = ttl_seconds or self._config.remote_default_ttl_seconds
+            if ttl:
+                self._redis.setex(key, int(ttl), serialized_value)
             else:
-                await self._redis.set(key, serialized_value)
+                self._redis.set(key, serialized_value)
         except Exception as e:
             logger.debug(f"Failed to set cache key {key}: {e}")
 
-    def set_sync(
-        self, key: str, value: Any, ttl_seconds: Optional[float] = None
-    ) -> None:
-        """Synchronous version of set() - delegates to async method."""
-        try:
-            asyncio.run(self.set(key, value, ttl_seconds))
-        except RuntimeError:
-            # Fallback for when already in async context
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(self.set(key, value, ttl_seconds))
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-    async def delete(self, key: str) -> None:
-        """Delete key from Redis asynchronously."""
+    def delete(self, key: str) -> None:
+        """Delete key from Redis."""
         if not self._redis:
             return
-
         try:
-            await self._redis.delete(key)
+            self._redis.delete(key)
         except Exception as e:
             logger.debug(f"Failed to delete cache key {key}: {e}")
 
-    def delete_sync(self, key: str) -> None:
-        """Synchronous version of delete() - delegates to async method."""
-        try:
-            asyncio.run(self.delete(key))
-        except RuntimeError:
-            # Fallback for when already in async context
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(self.delete(key))
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-    async def ping(self) -> bool:
-        """Check if Redis is available asynchronously."""
+    def ping(self) -> bool:
+        """Check if Redis is available."""
         if not self._redis:
             return False
 
         try:
-            await self._redis.ping()
+            self._redis.ping()
             return True
         except Exception:
             return False
-
-    def ping_sync(self) -> bool:
-        """Synchronous version of ping() - delegates to async method."""
-        try:
-            return asyncio.run(self.ping())
-        except RuntimeError:
-            # Fallback for when already in async context
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(self.ping())
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-    # Compatibility methods for unified cache interface
-    def set_with_ordered_ttl(self, key: str, value: Any) -> None:
-        """Set value with TTL for ordered messages."""
-        # Use a longer TTL for ordered messages (1 hour)
-        self.set_sync(key, value, 3600.0)
-
-    async def delete_pattern(self, pattern: str) -> None:
-        """Delete keys matching pattern from Redis asynchronously."""
-        if not self._redis:
-            return
-
-        try:
-            deleted_count = 0
-            async for key in self._redis.scan_iter(match=pattern, count=100):
-                await self._redis.delete(key)
-                deleted_count += 1
-            logger.debug(f"Deleted {deleted_count} keys matching pattern: {pattern}")
-        except Exception as e:
-            logger.debug(f"Failed to delete cache keys matching pattern {pattern}: {e}")
-
-    def delete_pattern_sync(self, pattern: str) -> None:
-        """Delete keys matching pattern from Redis synchronously."""
-        try:
-            asyncio.run(self.delete_pattern(pattern))
-        except RuntimeError:
-            # Fallback for when already in async context
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(self.delete_pattern(pattern))
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-    def is_remote_available(self) -> bool:
-        """Check if remote cache is available."""
-        return True  # Remote cache is always available by design
-
-    def clear(self) -> None:
-        """Clear all cache entries safely."""
-        # Use pattern-based deletion for app-specific clearing
-        self.delete_pattern_sync("kafka_smart_producer:*")
 
 
 class CacheUnavailableError(CacheError):
@@ -619,7 +347,6 @@ class CacheFactory:
         cache_config = CacheConfig(
             local_max_size=smart_config.get("cache_max_size", 1000),
             local_default_ttl_seconds=smart_config.get("cache_ttl_ms", 300000) / 1000.0,
-            ordered_message_ttl=smart_config.get("ordered_message_ttl", 3600.0),
         )
         return DefaultLocalCache(cache_config)
 
@@ -629,8 +356,8 @@ class CacheFactory:
     ) -> Optional["DefaultRemoteCache"]:
         """Create standalone remote cache instance if configuration is valid."""
         try:
-            # Import redis.asyncio here to avoid import errors if redis is not available
-            import redis.asyncio as redis
+            # Import sync redis client
+            import redis
 
             # Build Redis connection parameters
             redis_kwargs = {
@@ -657,31 +384,24 @@ class CacheFactory:
                 if smart_config.get("redis_ssl_keyfile"):
                     redis_kwargs["ssl_keyfile"] = smart_config["redis_ssl_keyfile"]
 
-            # Create async Redis client
+            # Create sync Redis client
             redis_client = redis.Redis(**redis_kwargs)
 
-            # Test connection by attempting ping
+            # Test connection
             try:
-                # For connection testing, we need to use sync ping
-                import redis as sync_redis
-
-                # Create a temp sync client for testing
-                sync_kwargs = redis_kwargs.copy()
-                if "ssl" in sync_kwargs:
-                    sync_kwargs.pop("ssl")
-                    if smart_config.get("redis_ssl_enabled", False):
-                        sync_kwargs["ssl"] = True
-
-                test_client = sync_redis.Redis(**sync_kwargs)
-                test_client.ping()
-                test_client.close()
-
+                redis_client.ping()
             except Exception as e:
                 logger.warning(f"Redis connection test failed: {e}")
+                redis_client.close()
                 return None
 
+            # Create cache config
+            cache_config = CacheConfig(
+                remote_default_ttl_seconds=smart_config.get("redis_ttl_seconds", 900.0),
+            )
+
             # Create cache instance
-            remote_cache_instance = DefaultRemoteCache(redis_client)
+            remote_cache_instance = DefaultRemoteCache(redis_client, cache_config)
 
             ssl_status = (
                 "with SSL" if smart_config.get("redis_ssl_enabled") else "without SSL"
@@ -705,26 +425,27 @@ class CacheFactory:
 
     @staticmethod
     def create_hybrid_cache(
-        smart_config: Dict[str, Any], enable_redis: bool = False
+        smart_config: Dict[str, Any], enable_redis: bool = True
     ) -> "DefaultHybridCache":
-        """Create secure hybrid cache with proper SSL/TLS support."""
+        """Create hybrid cache - remote cache is required."""
+        if not enable_redis:
+            raise ValueError("Hybrid cache requires Redis to be enabled")
+
         cache_config = CacheConfig(
             local_max_size=smart_config["cache_max_size"],
             local_default_ttl_seconds=smart_config["cache_ttl_ms"] / 1000.0,
             remote_default_ttl_seconds=smart_config["redis_ttl_seconds"],
-            ordered_message_ttl=smart_config["ordered_message_ttl"],
         )
 
-        # Create local cache using factory method
+        # Create local cache
         local_cache = CacheFactory.create_local_cache(smart_config)
 
-        # Create remote cache using factory method if enabled
-        remote_cache = None
-        if enable_redis:
-            remote_cache = CacheFactory.create_remote_cache(smart_config)
-            if remote_cache is None:
-                logger.warning(
-                    "Redis connection failed, falling back to local cache only"
-                )
+        # Create remote cache - fail fast if it fails
+        remote_cache = CacheFactory.create_remote_cache(smart_config)
+        if remote_cache is None:
+            raise RuntimeError(
+                "Failed to create remote cache for hybrid mode. "
+                "Check Redis configuration and connectivity."
+            )
 
         return DefaultHybridCache(local_cache, remote_cache, cache_config)

@@ -8,8 +8,9 @@ import logging
 import time
 from typing import Dict, List
 
+from kafka_smart_producer.producer_config import ProducerConfig
+
 # Test the internal logic components independently
-from kafka_smart_producer.producer import SmartProducer
 
 logger = logging.getLogger(__name__)
 
@@ -42,35 +43,34 @@ class MockHealthManager:
 class TestProducerComponents:
     """Test individual components of the producer."""
 
-    def test_extract_smart_config(self):
-        """Test configuration extraction."""
-        config = {
+    def test_producer_config_handling(self):
+        """Test ProducerConfig creation and clean Kafka config extraction."""
+        config_dict = {
             "bootstrap.servers": "localhost:9092",
-            "smart.partitioning.enabled": False,
-            "smart.cache.ttl.ms": 60000,
-            "smart.health.check.enabled": False,
+            "topics": ["test-topic"],
+            "smart_enabled": False,
+            "key_stickiness": True,
+            "cache": {"local_max_size": 100, "local_ttl_seconds": 60},
         }
 
-        # Create a minimal mock producer to test config extraction
-        class MockProducer(SmartProducer):
-            def __init__(self, config):
-                # Don't call super().__init__ to avoid the confluent-kafka dependency
-                smart_config = self._extract_smart_config(config)
-                self.smart_config = smart_config
-                self.config = config  # After extraction, config is modified
+        # Test ProducerConfig creation from dict
+        producer_config = ProducerConfig.from_dict(config_dict)
 
-        producer = MockProducer(config)
+        # Verify smart configuration is properly stored
+        assert producer_config.smart_enabled is False
+        assert producer_config.key_stickiness is True
+        assert producer_config.cache_config.local_max_size == 100
+        assert producer_config.cache_config.local_default_ttl_seconds == 60
 
-        # Smart config should be extracted
-        assert producer.smart_config["enabled"] is False
-        assert producer.smart_config["cache_ttl_ms"] == 60000
-        assert producer.smart_config["health_check_enabled"] is False
+        # Test clean Kafka config extraction
+        clean_kafka_config = producer_config.get_clean_kafka_config()
 
-        # Original config should have smart keys removed
-        assert "smart.partitioning.enabled" not in producer.config
-        assert "smart.cache.ttl.ms" not in producer.config
-        assert "smart.health.check.enabled" not in producer.config
-        assert "bootstrap.servers" in producer.config
+        # Clean config should only have Kafka-specific keys
+        assert clean_kafka_config["bootstrap.servers"] == "localhost:9092"
+        assert "topics" not in clean_kafka_config
+        assert "smart_enabled" not in clean_kafka_config
+        assert "key_stickiness" not in clean_kafka_config
+        assert "cache" not in clean_kafka_config
 
     def test_partition_selection_logic(self):
         """Test the partition selection logic independently."""
@@ -215,59 +215,6 @@ class TestProducerComponents:
         cached_partition, cache_time = producer._key_cache[cache_key]
         assert cached_partition == 0
         assert cache_time > time.time() * 1000 - 100  # Recent timestamp
-
-    def test_cache_stats_logic(self):
-        """Test cache statistics functionality."""
-
-        class TestableProducer:
-            def __init__(self):
-                self._key_cache = {}
-                self._cache_ttl_ms = 300000
-
-            def get_cache_stats(self):
-                """Copy of the actual logic from SmartProducer."""
-                if not self._key_cache:
-                    return {"enabled": False}
-
-                current_time = time.time() * 1000
-                valid_entries = sum(
-                    1
-                    for _, cache_time in self._key_cache.values()
-                    if current_time - cache_time < self._cache_ttl_ms
-                )
-
-                return {
-                    "enabled": True,
-                    "total_entries": len(self._key_cache),
-                    "valid_entries": valid_entries,
-                    "cache_ttl_ms": self._cache_ttl_ms,
-                }
-
-            def clear_cache(self):
-                """Copy of the actual logic from SmartProducer."""
-                if self._key_cache is not None:
-                    self._key_cache.clear()
-
-        producer = TestableProducer()
-
-        # Empty cache
-        stats = producer.get_cache_stats()
-        assert stats["enabled"] is False
-
-        # Add some cache entries
-        current_time = time.time() * 1000
-        producer._key_cache[("topic1", b"key1")] = (0, current_time)
-        producer._key_cache[("topic1", b"key2")] = (1, current_time - 400000)  # Expired
-
-        stats = producer.get_cache_stats()
-        assert stats["enabled"] is True
-        assert stats["total_entries"] == 2
-        assert stats["valid_entries"] == 1
-        assert stats["cache_ttl_ms"] == 300000
-
-        # Test cache clearing
-        producer.clear_cache()
-        assert len(producer._key_cache) == 0
 
     def test_no_health_manager_fallback(self):
         """Test behavior when no health manager is provided."""

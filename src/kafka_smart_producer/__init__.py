@@ -10,6 +10,12 @@ __version__ = "0.1.0"
 __author__ = "Your Name"
 __email__ = "your.email@example.com"
 
+# Health management
+from .async_health_manager import AsyncHealthManager
+
+# Main producer classes
+from .async_producer import AsyncSmartProducer
+
 # Caching system
 from .caching import (
     CacheConfig,
@@ -25,7 +31,6 @@ from .caching import (
     RemoteCache,
 )
 
-# Core protocol interfaces
 # Exception classes
 from .exceptions import (
     CacheError,
@@ -37,26 +42,22 @@ from .exceptions import (
     SmartProducerError,
 )
 
-# Health management
-from .health import (
-    DefaultHealthManager,
-    HealthManager,
-    HealthManagerConfig,
-    PartitionHealth,
-    TopicHealth,
-)
+# Configuration
+from .health_config import HealthManagerConfig
+from .producer_config import ProducerConfig
 
-# Main producer classes
-from .producer import AsyncSmartProducer, SmartProducer
+# Core protocol interfaces
 from .protocols import CacheBackend, HotPartitionCalculator, LagDataCollector
+from .sync_health_manager import SyncHealthManager
+from .sync_producer import SmartProducer
 
-# Threading utilities
-from .threading import (
-    SimpleBackgroundRefresh,
-    create_async_background_task,
-    create_sync_background_refresh,
-    run_periodic_async,
-)
+# # Threading utilities
+# from .threading import (
+#     SimpleBackgroundRefresh,
+#     create_async_background_task,
+#     create_sync_background_refresh,
+#     run_periodic_async,
+# )
 
 # Default implementations
 # from .collectors import KafkaAdminLagCollector
@@ -87,18 +88,17 @@ __all__ = [
     "CacheFactory",
     "CacheTimeoutError",
     "CacheUnavailableError",
-    # Threading utilities
-    "SimpleBackgroundRefresh",
-    "run_periodic_async",
-    "create_async_background_task",
-    "create_sync_background_refresh",
-    # Health management
-    "HealthManager",
-    "DefaultHealthManager",
+    # # Threading utilities
+    # "SimpleBackgroundRefresh",
+    # "run_periodic_async",
+    # "create_async_background_task",
+    # "create_sync_background_refresh",
+    # Configuration
     "HealthManagerConfig",
-    "PartitionHealth",
-    "TopicHealth",
-    # Removed PartitionSelectionStrategy
+    "ProducerConfig",
+    # Health management
+    "SyncHealthManager",
+    "AsyncHealthManager",
     # Producer classes
     "SmartProducer",
     "AsyncSmartProducer",

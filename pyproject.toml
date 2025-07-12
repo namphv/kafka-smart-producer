@@ -76,6 +76,9 @@ ignore = [
     "S311", # random module (OK for non-crypto use)
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"examples/*" = ["E501"]  # Allow long lines in examples
+
 [tool.ruff]
 line-length = 88
 

@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from kafka_smart_producer.producer import AsyncSmartProducer
+from kafka_smart_producer.async_producer import AsyncSmartProducer
 
 
 class MockHealthManager:
@@ -45,6 +45,7 @@ def basic_config():
     return {
         "bootstrap.servers": "localhost:9092",
         "client.id": "test-async-producer",
+        "topics": ["logs"],
     }
 
 
@@ -60,9 +61,9 @@ def health_manager():
 
 
 @pytest.fixture
-def mock_smart_producer():
-    """Mock the sync SmartProducer for testing."""
-    with patch("kafka_smart_producer.producer.SmartProducer") as mock_class:
+def mock_confluent_producer():
+    """Mock the confluent-kafka Producer for testing."""
+    with patch("kafka_smart_producer.async_producer.ConfluentProducer") as mock_class:
         mock_instance = MagicMock()
         mock_class.return_value = mock_instance
 
@@ -75,13 +76,10 @@ def mock_smart_producer():
         # Mock the close method
         mock_instance.close.return_value = None
 
-        # Mock cache methods
-        mock_instance.get_cache_stats.return_value = {
-            "enabled": True,
-            "total_entries": 0,
-            "valid_entries": 0,
-            "cache_ttl_ms": 300000,
-        }
+        # Mock the list_topics method
+        mock_metadata = MagicMock()
+        mock_metadata.topics = {"test-topic": MagicMock()}
+        mock_instance.list_topics.return_value = mock_metadata
 
         yield mock_class, mock_instance
 
@@ -89,16 +87,14 @@ def mock_smart_producer():
 class TestAsyncSmartProducerInitialization:
     """Test AsyncSmartProducer initialization."""
 
-    def test_basic_initialization(self, mock_smart_producer, basic_config):
+    def test_basic_initialization(self, mock_confluent_producer, basic_config):
         """Test basic initialization of AsyncSmartProducer."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, _ = mock_confluent_producer
 
         producer = AsyncSmartProducer(basic_config)
 
-        # Should create sync producer
-        mock_class.assert_called_once_with(
-            basic_config, None, enable_redis=False, cache=None
-        )
+        # Should create confluent-kafka producer
+        mock_class.assert_called_once()
 
         # Should not be closed initially
         assert not producer.closed
@@ -107,17 +103,18 @@ class TestAsyncSmartProducerInitialization:
         assert producer._executor is not None
 
     def test_initialization_with_health_manager(
-        self, mock_smart_producer, basic_config, health_manager
+        self, mock_confluent_producer, basic_config, health_manager
     ):
         """Test initialization with health manager."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         producer = AsyncSmartProducer(basic_config, health_manager, max_workers=8)
 
-        # Should create sync producer with health manager
-        mock_class.assert_called_once_with(
-            basic_config, health_manager, enable_redis=False, cache=None
-        )
+        # Should create confluent-kafka producer
+        mock_class.assert_called_once()
+
+        # Should have the health manager
+        assert producer._health_manager is health_manager
 
         # Should use custom max_workers
         assert producer._executor._max_workers == 8
@@ -127,9 +124,9 @@ class TestAsyncProduceMethod:
     """Test async produce method."""
 
     @pytest.mark.asyncio
-    async def test_successful_produce(self, mock_smart_producer, basic_config):
+    async def test_successful_produce(self, mock_confluent_producer, basic_config):
         """Test successful message production."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         # Mock successful produce call
         def mock_produce(**kwargs):
@@ -156,10 +153,10 @@ class TestAsyncProduceMethod:
 
     @pytest.mark.asyncio
     async def test_produce_with_delivery_callback(
-        self, mock_smart_producer, basic_config
+        self, mock_confluent_producer, basic_config
     ):
         """Test produce with user-provided delivery callback."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         user_callback = Mock()
 
@@ -187,9 +184,11 @@ class TestAsyncProduceMethod:
         user_callback.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_produce_delivery_failure(self, mock_smart_producer, basic_config):
+    async def test_produce_delivery_failure(
+        self, mock_confluent_producer, basic_config
+    ):
         """Test produce with delivery failure."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         def mock_produce(**kwargs):
             # Simulate delivery failure
@@ -205,9 +204,9 @@ class TestAsyncProduceMethod:
             await producer.produce("test-topic", value=b"test-value", key=b"test-key")
 
     @pytest.mark.asyncio
-    async def test_produce_when_closed(self, mock_smart_producer, basic_config):
+    async def test_produce_when_closed(self, mock_confluent_producer, basic_config):
         """Test produce when producer is closed."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         producer = AsyncSmartProducer(basic_config)
         await producer.close()
@@ -217,9 +216,9 @@ class TestAsyncProduceMethod:
             await producer.produce("test-topic", value=b"test-value")
 
     @pytest.mark.asyncio
-    async def test_concurrent_produce(self, mock_smart_producer, basic_config):
+    async def test_concurrent_produce(self, mock_confluent_producer, basic_config):
         """Test concurrent message production."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         def mock_produce(**kwargs):
             # Simulate successful delivery
@@ -256,9 +255,9 @@ class TestAsyncFlushMethod:
     """Test async flush method."""
 
     @pytest.mark.asyncio
-    async def test_successful_flush(self, mock_smart_producer, basic_config):
+    async def test_successful_flush(self, mock_confluent_producer, basic_config):
         """Test successful flush operation."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         mock_instance.flush.return_value = 0  # No messages remaining
 
@@ -270,9 +269,9 @@ class TestAsyncFlushMethod:
         mock_instance.flush.assert_called_once_with(10.0)
 
     @pytest.mark.asyncio
-    async def test_flush_when_closed(self, mock_smart_producer, basic_config):
+    async def test_flush_when_closed(self, mock_confluent_producer, basic_config):
         """Test flush when producer is closed."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         producer = AsyncSmartProducer(basic_config)
         await producer.close()
@@ -290,9 +289,9 @@ class TestAsyncPollMethod:
     """Test async poll method."""
 
     @pytest.mark.asyncio
-    async def test_successful_poll(self, mock_smart_producer, basic_config):
+    async def test_successful_poll(self, mock_confluent_producer, basic_config):
         """Test successful poll operation."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         mock_instance.poll.return_value = 5  # 5 events processed
 
@@ -304,9 +303,9 @@ class TestAsyncPollMethod:
         mock_instance.poll.assert_called_with(1.0)
 
     @pytest.mark.asyncio
-    async def test_poll_when_closed(self, mock_smart_producer, basic_config):
+    async def test_poll_when_closed(self, mock_confluent_producer, basic_config):
         """Test poll when producer is closed."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         producer = AsyncSmartProducer(basic_config)
         await producer.close()
@@ -320,9 +319,9 @@ class TestAsyncCloseMethod:
     """Test async close method."""
 
     @pytest.mark.asyncio
-    async def test_successful_close(self, mock_smart_producer, basic_config):
+    async def test_successful_close(self, mock_confluent_producer, basic_config):
         """Test successful close operation."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         producer = AsyncSmartProducer(basic_config)
 
@@ -336,9 +335,9 @@ class TestAsyncCloseMethod:
         mock_instance.close.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_close_idempotent(self, mock_smart_producer, basic_config):
+    async def test_close_idempotent(self, mock_confluent_producer, basic_config):
         """Test that close is idempotent."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         producer = AsyncSmartProducer(basic_config)
 
@@ -351,46 +350,13 @@ class TestAsyncCloseMethod:
         mock_instance.close.assert_called_once()
 
 
-class TestCacheOperations:
-    """Test cache-related operations."""
-
-    def test_get_cache_stats(self, mock_smart_producer, basic_config):
-        """Test get cache stats operation."""
-        mock_class, mock_instance = mock_smart_producer
-
-        expected_stats = {
-            "enabled": True,
-            "total_entries": 5,
-            "valid_entries": 3,
-            "cache_ttl_ms": 300000,
-        }
-        mock_instance.get_cache_stats.return_value = expected_stats
-
-        producer = AsyncSmartProducer(basic_config)
-
-        stats = producer.get_cache_stats()
-
-        assert stats == expected_stats
-        mock_instance.get_cache_stats.assert_called_once()
-
-    def test_clear_cache(self, mock_smart_producer, basic_config):
-        """Test clear cache operation."""
-        mock_class, mock_instance = mock_smart_producer
-
-        producer = AsyncSmartProducer(basic_config)
-
-        producer.clear_cache()
-
-        mock_instance.clear_cache.assert_called_once()
-
-
 class TestAsyncContextManager:
     """Test async context manager functionality."""
 
     @pytest.mark.asyncio
-    async def test_async_context_manager(self, mock_smart_producer, basic_config):
+    async def test_async_context_manager(self, mock_confluent_producer, basic_config):
         """Test async context manager usage."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         def mock_produce(**kwargs):
             callback = kwargs["on_delivery"]
@@ -418,9 +384,9 @@ class TestErrorHandling:
     """Test error handling scenarios."""
 
     @pytest.mark.asyncio
-    async def test_produce_executor_error(self, mock_smart_producer, basic_config):
+    async def test_produce_executor_error(self, mock_confluent_producer, basic_config):
         """Test error handling in produce method."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         # Mock produce to raise exception
         mock_instance.produce.side_effect = Exception("Produce failed")
@@ -432,9 +398,9 @@ class TestErrorHandling:
             await producer.produce("test-topic", value=b"test-value")
 
     @pytest.mark.asyncio
-    async def test_user_callback_error(self, mock_smart_producer, basic_config):
+    async def test_user_callback_error(self, mock_confluent_producer, basic_config):
         """Test error handling when user callback raises exception."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         def mock_produce(**kwargs):
             callback = kwargs["on_delivery"]
@@ -462,9 +428,9 @@ class TestRealWorldUsage:
     """Test real-world usage patterns."""
 
     @pytest.mark.asyncio
-    async def test_batch_processing(self, mock_smart_producer, basic_config):
+    async def test_batch_processing(self, mock_confluent_producer, basic_config):
         """Test batch processing pattern."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         def mock_produce(**kwargs):
             callback = kwargs["on_delivery"]
@@ -498,9 +464,9 @@ class TestRealWorldUsage:
         await producer.close()
 
     @pytest.mark.asyncio
-    async def test_producer_lifecycle(self, mock_smart_producer, basic_config):
+    async def test_producer_lifecycle(self, mock_confluent_producer, basic_config):
         """Test complete producer lifecycle."""
-        mock_class, mock_instance = mock_smart_producer
+        mock_class, mock_instance = mock_confluent_producer
 
         def mock_produce(**kwargs):
             callback = kwargs["on_delivery"]
@@ -519,10 +485,6 @@ class TestRealWorldUsage:
             # Produce some messages
             await producer.produce("events", value=b"event1", key=b"user1")
             await producer.produce("events", value=b"event2", key=b"user2")
-
-            # Check cache stats
-            stats = producer.get_cache_stats()
-            assert "enabled" in stats
 
             # Poll for events
             await producer.poll(timeout=0.1)

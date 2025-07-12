@@ -18,18 +18,18 @@ class LagDataCollector(Protocol):
     Prometheus metrics, or any other monitoring system.
 
     Threading Considerations:
-    - Async methods must not block the event loop
-    - Sync methods provide blocking alternatives for sync contexts
-    - All implementations should support concurrent access
+    - All methods are synchronous for simplicity and compatibility
+    - Implementations should be thread-safe for concurrent access
+    - Can be used with asyncio via run_in_executor when needed
     """
 
     @abstractmethod
-    async def get_lag_data(self, topic: str) -> Dict[int, int]:
+    def get_lag_data(self, topic: str) -> Dict[int, int]:
         """
         Collect consumer lag data for all partitions of a topic.
 
-        This method must be truly async and not block the event loop.
-        Should handle asyncio cancellation properly.
+        This method should complete reasonably quickly (< 5s typical).
+        For async contexts, use asyncio.run_in_executor.
 
         Args:
             topic: Kafka topic name
@@ -38,24 +38,6 @@ class LagDataCollector(Protocol):
             Dict mapping partition_id -> lag_count
             - partition_id: Non-negative integer
             - lag_count: Non-negative integer
-
-        Raises:
-            LagDataUnavailableError: When lag data cannot be retrieved
-        """
-        ...
-
-    @abstractmethod
-    def get_lag_data_sync(self, topic: str) -> Dict[int, int]:
-        """
-        Synchronous version of get_lag_data for sync contexts.
-
-        Should complete quickly (< 50ms typical).
-
-        Args:
-            topic: Kafka topic name
-
-        Returns:
-            Dict mapping partition_id -> lag_count
 
         Raises:
             LagDataUnavailableError: When lag data cannot be retrieved
@@ -79,12 +61,15 @@ class HotPartitionCalculator(Protocol):
     """
     Protocol for calculating partition health scores from lag data.
 
+    DEPRECATED: The new simplified HealthManager includes built-in
+    health calculation. This protocol is kept for backward compatibility.
+
     Implementations define the logic for converting raw lag metrics into
     normalized health scores that guide partition selection.
 
     Threading Considerations:
     - Should be CPU-bound and thread-safe
-    - No async methods needed (purely computational)
+    - All methods are synchronous for simplicity
     - Must handle concurrent access safely
     """
 
