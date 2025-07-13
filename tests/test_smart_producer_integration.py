@@ -41,7 +41,7 @@ class TestSmartProducerIntegration:
         mock_confluent_producer.return_value = mock_producer_instance
 
         with patch(
-            "kafka_smart_producer.sync_health_manager.SyncHealthManager"
+            "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor.from_config"
         ) as mock_health_manager_class:
             mock_health_manager = Mock()
             mock_health_manager_class.return_value = mock_health_manager
@@ -68,7 +68,7 @@ class TestSmartProducerIntegration:
         mock_confluent_producer.return_value = mock_producer_instance
 
         with patch(
-            "kafka_smart_producer.async_health_manager.AsyncHealthManager"
+            "kafka_smart_producer.async_producer.AsyncSmartProducer._create_health_manager"
         ) as mock_health_manager_class:
             mock_health_manager = Mock()
             mock_health_manager_class.return_value = mock_health_manager
@@ -95,7 +95,7 @@ class TestSmartProducerIntegration:
         mock_confluent_producer.return_value = mock_producer_instance
 
         with patch(
-            "kafka_smart_producer.sync_health_manager.SyncHealthManager"
+            "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor.from_config"
         ) as mock_health_manager_class:
             mock_health_manager = Mock()
             mock_health_manager.get_healthy_partitions.return_value = [0, 2, 4]
@@ -116,7 +116,7 @@ class TestSmartProducerIntegration:
             assert call_kwargs["partition"] in [0, 2, 4]
 
             # Should flush after produce
-            mock_producer_instance.flush.assert_called_once()
+            mock_producer_instance.poll.assert_called_with(0)
 
     @patch("kafka_smart_producer.async_producer.ConfluentProducer")
     async def test_async_producer_smart_partition_selection(
@@ -135,7 +135,7 @@ class TestSmartProducerIntegration:
         mock_producer_instance.poll.return_value = 0
 
         with patch(
-            "kafka_smart_producer.async_health_manager.AsyncHealthManager"
+            "kafka_smart_producer.async_producer.AsyncSmartProducer._create_health_manager"
         ) as mock_health_manager_class:
             mock_health_manager = Mock()
             mock_health_manager.get_healthy_partitions.return_value = [1, 3, 5]
@@ -169,7 +169,7 @@ class TestSmartProducerIntegration:
         mock_confluent_producer.return_value = mock_producer_instance
 
         with patch(
-            "kafka_smart_producer.sync_health_manager.SyncHealthManager"
+            "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor.from_config"
         ) as mock_health_manager_class:
             mock_health_manager = Mock()
             mock_health_manager.get_healthy_partitions.return_value = [0, 1, 2]
@@ -192,7 +192,7 @@ class TestSmartProducerIntegration:
 
             # Should have called produce twice and flush twice
             assert mock_producer_instance.produce.call_count == 2
-            assert mock_producer_instance.flush.call_count == 2
+            assert mock_producer_instance.poll.call_count == 2
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
     def test_sync_producer_disabled_smart_partitioning(self, mock_confluent_producer):
@@ -222,7 +222,7 @@ class TestSmartProducerIntegration:
         assert "partition" not in call_kwargs
 
         # Should still flush
-        mock_producer_instance.flush.assert_called_once()
+        mock_producer_instance.poll.assert_called_with(0)
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
     def test_sync_producer_explicit_partition_override(
@@ -233,7 +233,7 @@ class TestSmartProducerIntegration:
         mock_confluent_producer.return_value = mock_producer_instance
 
         with patch(
-            "kafka_smart_producer.sync_health_manager.SyncHealthManager"
+            "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor.from_config"
         ) as mock_health_manager_class:
             mock_health_manager = Mock()
             mock_health_manager.get_healthy_partitions.return_value = [0, 1, 2]
@@ -262,7 +262,7 @@ class TestSmartProducerIntegration:
         mock_confluent_producer.return_value = mock_producer_instance
 
         with patch(
-            "kafka_smart_producer.sync_health_manager.SyncHealthManager"
+            "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor.from_config"
         ) as mock_health_manager_class:
             mock_health_manager = Mock()
             mock_health_manager.get_healthy_partitions.side_effect = Exception(
@@ -280,7 +280,7 @@ class TestSmartProducerIntegration:
             assert "partition" not in call_kwargs
 
             # Should still flush
-            mock_producer_instance.flush.assert_called_once()
+            mock_producer_instance.poll.assert_called_with(0)
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
     def test_sync_producer_no_key_stickiness(self, mock_confluent_producer):
@@ -299,7 +299,7 @@ class TestSmartProducerIntegration:
         mock_confluent_producer.return_value = mock_producer_instance
 
         with patch(
-            "kafka_smart_producer.sync_health_manager.SyncHealthManager"
+            "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor.from_config"
         ) as mock_health_manager_class:
             mock_health_manager = Mock()
             mock_health_manager.get_healthy_partitions.return_value = [0, 1, 2]
@@ -340,7 +340,7 @@ class TestSmartProducerIntegration:
         mock_producer_instance.poll.return_value = 0
 
         with patch(
-            "kafka_smart_producer.async_health_manager.AsyncHealthManager"
+            "kafka_smart_producer.async_producer.AsyncSmartProducer._create_health_manager"
         ) as mock_health_manager_class:
             mock_health_manager = Mock()
             mock_health_manager.get_healthy_partitions.return_value = [0]
@@ -369,7 +369,7 @@ class TestSmartProducerIntegration:
         mock_producer_instance.poll.return_value = 0
 
         with patch(
-            "kafka_smart_producer.async_health_manager.AsyncHealthManager"
+            "kafka_smart_producer.async_producer.AsyncSmartProducer._create_health_manager"
         ) as mock_health_manager_class:
             mock_health_manager = Mock()
             mock_health_manager.get_healthy_partitions.return_value = [0, 1, 2]

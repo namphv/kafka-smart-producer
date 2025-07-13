@@ -1,7 +1,8 @@
 """
 Tests for health management components.
 
-This module tests the SyncHealthManager and AsyncHealthManager implementations
+This module tests the PartitionHealthMonitor and
+AsyncPartitionHealthMonitor implementations
 including partition health tracking, selection strategies,
 and background refresh operations.
 """
@@ -13,10 +14,12 @@ from typing import Dict, Optional
 
 import pytest
 
-from kafka_smart_producer.async_health_manager import AsyncHealthManager
+from kafka_smart_producer.async_partition_health_monitor import (
+    AsyncPartitionHealthMonitor,
+)
 from kafka_smart_producer.exceptions import LagDataUnavailableError
 from kafka_smart_producer.health_config import HealthManagerConfig
-from kafka_smart_producer.sync_health_manager import SyncHealthManager
+from kafka_smart_producer.partition_health_monitor import PartitionHealthMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -115,21 +118,21 @@ class TestHealthManagerConfig:
         assert config.get_async_option("missing_option", "default") == "default"
 
 
-class TestSyncHealthManager:
-    """Test SyncHealthManager implementation."""
+class TestPartitionHealthMonitor:
+    """Test PartitionHealthMonitor implementation."""
 
     def create_sync_health_manager(
         self,
         lag_data: Optional[Dict[str, Dict[int, int]]] = None,
         config: Optional[HealthManagerConfig] = None,
-    ) -> SyncHealthManager:
+    ) -> PartitionHealthMonitor:
         """Create a sync health manager with mock dependencies."""
         lag_collector = MockLagDataCollector(lag_data)
         config = config or HealthManagerConfig(
             consumer_group="test-group", refresh_interval=0.1
         )
 
-        return SyncHealthManager(
+        return PartitionHealthMonitor(
             lag_collector=lag_collector,
             cache=None,  # No cache for simplicity
             health_threshold=config.health_threshold,
@@ -232,7 +235,7 @@ class TestSyncHealthManager:
         assert "healthy_partitions" in summary
 
     def test_from_config_factory_method(self):
-        """Test creating SyncHealthManager from configuration."""
+        """Test creating PartitionHealthMonitor from configuration."""
         config = HealthManagerConfig(
             consumer_group="test-group",
             health_threshold=0.7,
@@ -242,7 +245,7 @@ class TestSyncHealthManager:
         kafka_config = {"bootstrap.servers": "localhost:9092"}
 
         try:
-            manager = SyncHealthManager.from_config(config, kafka_config)
+            manager = PartitionHealthMonitor.from_config(config, kafka_config)
             assert manager._health_threshold == 0.7
             assert manager._refresh_interval == 3.0
         except Exception:
@@ -251,21 +254,21 @@ class TestSyncHealthManager:
             pytest.skip("KafkaAdminLagCollector not available in test environment")
 
 
-class TestAsyncHealthManager:
-    """Test AsyncHealthManager implementation."""
+class TestAsyncPartitionHealthMonitor:
+    """Test AsyncPartitionHealthMonitor implementation."""
 
     def create_async_health_manager(
         self,
         lag_data: Optional[Dict[str, Dict[int, int]]] = None,
         config: Optional[HealthManagerConfig] = None,
-    ) -> AsyncHealthManager:
+    ) -> AsyncPartitionHealthMonitor:
         """Create an async health manager with mock dependencies."""
         lag_collector = MockLagDataCollector(lag_data)
         config = config or HealthManagerConfig(
             consumer_group="test-group", refresh_interval=0.1
         )
 
-        return AsyncHealthManager(
+        return AsyncPartitionHealthMonitor(
             lag_collector=lag_collector,
             cache=None,  # No cache for simplicity
             health_threshold=config.health_threshold,
@@ -385,7 +388,7 @@ class TestAsyncHealthManager:
         assert not manager._running
 
     def test_from_config_factory_method_async(self):
-        """Test creating AsyncHealthManager from configuration."""
+        """Test creating AsyncPartitionHealthMonitor from configuration."""
         config = HealthManagerConfig(
             consumer_group="test-group",
             health_threshold=0.7,
@@ -395,7 +398,7 @@ class TestAsyncHealthManager:
         kafka_config = {"bootstrap.servers": "localhost:9092"}
 
         try:
-            manager = AsyncHealthManager.from_config(config, kafka_config)
+            manager = AsyncPartitionHealthMonitor.from_config(config, kafka_config)
             assert manager._health_threshold == 0.7
             assert manager._refresh_interval == 3.0
         except Exception:
@@ -435,7 +438,7 @@ class TestHealthManagerComparison:
     def create_sync_manager(self, lag_data, config):
         """Helper to create sync manager."""
         lag_collector = MockLagDataCollector(lag_data)
-        return SyncHealthManager(
+        return PartitionHealthMonitor(
             lag_collector=lag_collector,
             cache=None,
             health_threshold=config.health_threshold,
@@ -446,7 +449,7 @@ class TestHealthManagerComparison:
     def create_async_manager(self, lag_data, config):
         """Helper to create async manager."""
         lag_collector = MockLagDataCollector(lag_data)
-        return AsyncHealthManager(
+        return AsyncPartitionHealthMonitor(
             lag_collector=lag_collector,
             cache=None,
             health_threshold=config.health_threshold,
@@ -461,7 +464,7 @@ class TestErrorHandling:
     def test_sync_error_handling(self):
         """Test error handling in sync health manager."""
         lag_collector = MockLagDataCollector(should_fail=True)
-        manager = SyncHealthManager(
+        manager = PartitionHealthMonitor(
             lag_collector=lag_collector,
             cache=None,
             health_threshold=0.5,
@@ -484,7 +487,7 @@ class TestErrorHandling:
     async def test_async_error_handling(self):
         """Test error handling in async health manager."""
         lag_collector = MockLagDataCollector(should_fail=True)
-        manager = AsyncHealthManager(
+        manager = AsyncPartitionHealthMonitor(
             lag_collector=lag_collector,
             cache=None,
             health_threshold=0.5,

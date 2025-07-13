@@ -1,5 +1,5 @@
 """
-Asynchronous Health Manager using asyncio for background monitoring.
+Asynchronous Partition Health Monitor using asyncio for background monitoring.
 """
 
 import asyncio
@@ -28,7 +28,7 @@ CacheBackend = Union["DefaultLocalCache", "DefaultRemoteCache", "DefaultHybridCa
 logger = logging.getLogger(__name__)
 
 
-class AsyncHealthManager:
+class AsyncPartitionHealthMonitor:
     """
     Asynchronous health manager using asyncio for background monitoring.
 
@@ -89,7 +89,7 @@ class AsyncHealthManager:
         cache_type = type(cache).__name__ if cache else "in-memory"
         redis_status = "enabled" if redis_health_publisher else "disabled"
         logger.info(
-            f"AsyncHealthManager initialized - mode={mode}, "
+            f"AsyncPartitionHealthMonitor initialized - mode={mode}, "
             f"threshold={health_threshold}, interval={refresh_interval}s, "
             f"max_lag={max_lag_for_health}, cache={cache_type}, "
             f"redis_publisher={redis_status}, reactive_streams=enabled"
@@ -98,9 +98,9 @@ class AsyncHealthManager:
     @classmethod
     def embedded(
         cls, lag_collector: "LagDataCollector", topics: Optional[List[str]] = None
-    ) -> "AsyncHealthManager":
+    ) -> "AsyncPartitionHealthMonitor":
         """
-        Create AsyncHealthManager for embedded mode (producer integration).
+        Create AsyncPartitionHealthMonitor for embedded mode (producer integration).
 
         This factory method creates a lightweight health manager optimized for
         integration with AsyncSmartProducer. No Redis publishing, minimal features.
@@ -110,11 +110,11 @@ class AsyncHealthManager:
             topics: Optional list of topics to monitor initially
 
         Returns:
-            AsyncHealthManager configured for embedded mode
+            AsyncPartitionHealthMonitor configured for embedded mode
 
         Example:
             lag_collector = KafkaAdminLagCollector(...)
-            health_manager = AsyncHealthManager.embedded(
+            health_manager = AsyncPartitionHealthMonitor.embedded(
                 lag_collector, ["orders", "payments"]
             )
         """
@@ -143,9 +143,9 @@ class AsyncHealthManager:
         health_threshold: float = 0.5,
         refresh_interval: float = 5.0,
         max_lag_for_health: int = 1000,
-    ) -> "AsyncHealthManager":
+    ) -> "AsyncPartitionHealthMonitor":
         """
-        Create AsyncHealthManager for standalone mode (monitoring service).
+        Create AsyncPartitionHealthMonitor for standalone mode (monitoring service).
 
         This factory method creates a full-featured health manager for running
         as an independent monitoring service with Redis publishing and health streams.
@@ -159,10 +159,10 @@ class AsyncHealthManager:
             max_lag_for_health: Maximum lag for 0.0 health score
 
         Returns:
-            AsyncHealthManager configured for standalone mode
+            AsyncPartitionHealthMonitor configured for standalone mode
 
         Example:
-            health_manager = await AsyncHealthManager.standalone(
+            health_manager = await AsyncPartitionHealthMonitor.standalone(
                 consumer_group="my-consumers",
                 kafka_config={"bootstrap.servers": "localhost:9092"},
                 topics=["orders", "payments"]
@@ -215,9 +215,9 @@ class AsyncHealthManager:
     @classmethod
     def from_config(
         cls, health_config: "HealthManagerConfig", kafka_config: Dict[str, Any]
-    ) -> "AsyncHealthManager":
+    ) -> "AsyncPartitionHealthMonitor":
         """
-        Factory method to create AsyncHealthManager from unified configuration.
+        Factory method to create AsyncPartitionHealthMonitor from unified configuration.
 
         Args:
             health_config: Health manager configuration
@@ -225,7 +225,7 @@ class AsyncHealthManager:
                           security, etc.)
 
         Returns:
-            Configured AsyncHealthManager instance
+            Configured AsyncPartitionHealthMonitor instance
 
         Raises:
             ValueError: If configuration is invalid
@@ -274,7 +274,7 @@ class AsyncHealthManager:
         # Log async capability detection
         is_async_native = hasattr(lag_collector, "get_lag_data_async")
         logger.info(
-            f"AsyncHealthManager mode: {mode}, lag collector: "
+            f"AsyncPartitionHealthMonitor mode: {mode}, lag collector: "
             f"{'async-native' if is_async_native else 'executor-wrapped'}"
         )
 
@@ -296,12 +296,12 @@ class AsyncHealthManager:
         for the sync lag collection operations.
         """
         if self._running:
-            logger.warning("AsyncHealthManager already running")
+            logger.warning("AsyncPartitionHealthMonitor already running")
             return
 
         self._running = True
         self._task = asyncio.create_task(self._refresh_loop())
-        logger.info("AsyncHealthManager started")
+        logger.info("AsyncPartitionHealthMonitor started")
 
     async def stop(self) -> None:
         """Stop health monitoring in async context."""
@@ -325,7 +325,7 @@ class AsyncHealthManager:
                 except asyncio.QueueEmpty:
                     break
 
-        logger.info("AsyncHealthManager stopped")
+        logger.info("AsyncPartitionHealthMonitor stopped")
 
     def get_healthy_partitions(self, topic: str) -> List[int]:
         """
@@ -508,7 +508,7 @@ class AsyncHealthManager:
             topics: List of topic names to monitor concurrently
         """
         if self._running:
-            logger.warning("AsyncHealthManager already running")
+            logger.warning("AsyncPartitionHealthMonitor already running")
             return
 
         self._running = True
@@ -667,7 +667,7 @@ class AsyncHealthManager:
         """Check if health manager is currently running."""
         return self._running
 
-    async def __aenter__(self) -> "AsyncHealthManager":
+    async def __aenter__(self) -> "AsyncPartitionHealthMonitor":
         """Async context manager entry."""
         await self.start()
         return self
@@ -806,7 +806,7 @@ class AsyncHealthManager:
 
     def __repr__(self) -> str:
         return (
-            f"AsyncHealthManager("
+            f"AsyncPartitionHealthMonitor("
             f"threshold={self._health_threshold}, "
             f"interval={self._refresh_interval}s, "
             f"running={self._running}"

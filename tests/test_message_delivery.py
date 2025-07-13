@@ -30,10 +30,8 @@ class TestSyncProducerMessageDelivery:
         )
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
-    def test_produce_calls_flush_immediately(
-        self, mock_confluent_producer, basic_config
-    ):
-        """Test that sync producer calls flush() immediately after produce()."""
+    def test_produce_calls_poll_only(self, mock_confluent_producer, basic_config):
+        """Test that sync producer calls poll(0) after produce() (no auto-flush)."""
         mock_producer_instance = Mock()
         mock_confluent_producer.return_value = mock_producer_instance
 
@@ -42,18 +40,18 @@ class TestSyncProducerMessageDelivery:
         # Produce a message
         producer.produce(topic="test-topic", value=b"test-message")
 
-        # Should call produce then flush immediately
+        # Should call produce then poll(0) only (no auto-flush)
         expected_calls = [
             call.produce(topic="test-topic", value=b"test-message"),
-            call.flush(),
+            call.poll(0),
         ]
         assert mock_producer_instance.mock_calls == expected_calls
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
-    def test_produce_with_all_parameters_then_flush(
+    def test_produce_with_all_parameters_then_poll(
         self, mock_confluent_producer, basic_config
     ):
-        """Test that flush is called even with all parameters."""
+        """Test that poll(0) is called even with all parameters."""
         mock_producer_instance = Mock()
         mock_confluent_producer.return_value = mock_producer_instance
 
@@ -74,7 +72,7 @@ class TestSyncProducerMessageDelivery:
             headers={"header1": b"value1"},
         )
 
-        # Should call produce with all params then flush
+        # Should call produce with all params then poll(0)
         mock_producer_instance.produce.assert_called_once_with(
             topic="test-topic",
             value=b"test-message",
@@ -84,13 +82,13 @@ class TestSyncProducerMessageDelivery:
             timestamp=1234567890,
             headers={"header1": b"value1"},
         )
-        mock_producer_instance.flush.assert_called_once()
+        mock_producer_instance.poll.assert_called_once_with(0)
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
-    def test_multiple_produces_flush_each_time(
+    def test_multiple_produces_poll_each_time(
         self, mock_confluent_producer, basic_config
     ):
-        """Test that each produce call results in a flush."""
+        """Test that each produce call results in a poll(0)."""
         mock_producer_instance = Mock()
         mock_confluent_producer.return_value = mock_producer_instance
 
@@ -101,15 +99,15 @@ class TestSyncProducerMessageDelivery:
         producer.produce(topic="test-topic", value=b"message2")
         producer.produce(topic="test-topic", value=b"message3")
 
-        # Should call flush after each produce
+        # Should call poll(0) after each produce
         assert mock_producer_instance.produce.call_count == 3
-        assert mock_producer_instance.flush.call_count == 3
+        assert mock_producer_instance.poll.call_count == 3
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
-    def test_produce_exception_does_not_call_flush(
+    def test_produce_exception_does_not_call_poll(
         self, mock_confluent_producer, basic_config
     ):
-        """Test that flush is not called if produce raises exception."""
+        """Test that poll is not called if produce raises exception."""
         mock_producer_instance = Mock()
         mock_producer_instance.produce.side_effect = Exception("Produce failed")
         mock_confluent_producer.return_value = mock_producer_instance
@@ -120,26 +118,49 @@ class TestSyncProducerMessageDelivery:
         with pytest.raises(Exception, match="Produce failed"):
             producer.produce(topic="test-topic", value=b"test-message")
 
-        # Should not call flush when produce fails
+        # Should not call poll when produce fails
         mock_producer_instance.produce.assert_called_once()
-        mock_producer_instance.flush.assert_not_called()
+        mock_producer_instance.poll.assert_not_called()
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
-    def test_flush_exception_is_propagated(self, mock_confluent_producer, basic_config):
-        """Test that flush exceptions are propagated to caller."""
+    def test_poll_exception_is_propagated(self, mock_confluent_producer, basic_config):
+        """Test that poll exceptions are propagated to caller."""
         mock_producer_instance = Mock()
-        mock_producer_instance.flush.side_effect = Exception("Flush failed")
+        mock_producer_instance.poll.side_effect = Exception("Poll failed")
         mock_confluent_producer.return_value = mock_producer_instance
 
         producer = SmartProducer(basic_config)
 
-        # Should propagate flush exception
-        with pytest.raises(Exception, match="Flush failed"):
+        # Should propagate poll exception
+        with pytest.raises(Exception, match="Poll failed"):
             producer.produce(topic="test-topic", value=b"test-message")
 
-        # Both produce and flush should be called
+        # Both produce and poll should be called
         mock_producer_instance.produce.assert_called_once()
-        mock_producer_instance.flush.assert_called_once()
+        mock_producer_instance.poll.assert_called_once_with(0)
+
+    @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
+    def test_manual_flush_method(self, mock_confluent_producer, basic_config):
+        """Test that manual flush method works correctly."""
+        mock_producer_instance = Mock()
+        mock_producer_instance.flush.return_value = 0  # No messages remaining
+        mock_confluent_producer.return_value = mock_producer_instance
+
+        producer = SmartProducer(basic_config)
+
+        # Test flush without timeout
+        result = producer.flush()
+        assert result == 0
+        mock_producer_instance.flush.assert_called_with()
+
+        # Reset mock
+        mock_producer_instance.reset_mock()
+        mock_producer_instance.flush.return_value = 5
+
+        # Test flush with timeout
+        result = producer.flush(timeout=10.0)
+        assert result == 5
+        mock_producer_instance.flush.assert_called_with(10.0)
 
 
 class TestAsyncProducerMessageDelivery:
@@ -400,8 +421,8 @@ class TestDeliveryBehaviorComparison:
         )
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
-    def test_sync_guarantees_immediate_delivery(self, mock_confluent_producer, config):
-        """Test that sync producer guarantees immediate delivery via flush."""
+    def test_sync_calls_poll_for_events(self, mock_confluent_producer, config):
+        """Test that sync producer calls poll(0) for event processing."""
         mock_producer_instance = Mock()
         mock_confluent_producer.return_value = mock_producer_instance
 
@@ -410,10 +431,10 @@ class TestDeliveryBehaviorComparison:
         # Produce message
         producer.produce(topic="test-topic", value=b"test-message")
 
-        # flush() should be called which guarantees delivery
-        mock_producer_instance.flush.assert_called_once()
+        # poll(0) should be called for event processing
+        mock_producer_instance.poll.assert_called_once_with(0)
 
-        # This means message is guaranteed to be sent before function returns
+        # Users can call flush() manually for guaranteed delivery
 
     @patch("kafka_smart_producer.async_producer.ConfluentProducer")
     async def test_async_waits_for_confirmation(self, mock_confluent_producer, config):

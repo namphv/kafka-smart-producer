@@ -12,13 +12,14 @@ from typing import Any, Dict, Optional
 @dataclass(frozen=True)
 class HealthManagerConfig:
     """
-    Unified configuration for both SyncHealthManager and AsyncHealthManager.
+    Unified configuration for both Partition Health Monitor class.
 
     This configuration works for both execution contexts and allows optional
     context-specific customization through sync_options and async_options.
 
     Example:
         # Simple config (works for both sync and async)
+
         config = HealthManagerConfig(
             consumer_group='my-group',
             health_threshold=0.8

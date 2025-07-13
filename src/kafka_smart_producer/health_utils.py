@@ -135,7 +135,11 @@ def create_lag_collector_from_config(
             consumer_group=consumer_group,
             timeout_seconds=timeout_seconds,
             # Pass through any additional Kafka config (security, etc.)
-            **{k: v for k, v in kafka_config.items() if k not in ["bootstrap.servers"]},
+            **{
+                k: v
+                for k, v in kafka_config.items()
+                if k not in ["bootstrap.servers", "consumer_group"]
+            },
         )
 
         return lag_collector

@@ -16,7 +16,7 @@ from .producer_config import ProducerConfig
 from .producer_utils import BasePartitionSelector
 
 if TYPE_CHECKING:
-    from .async_health_manager import AsyncHealthManager
+    from .async_partition_health_monitor import AsyncPartitionHealthMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class AsyncSmartProducer:
     def __init__(
         self,
         config: ProducerConfig,
-        health_manager: Optional["AsyncHealthManager"] = None,
+        health_manager: Optional["AsyncPartitionHealthMonitor"] = None,
         max_workers: Optional[int] = None,
     ) -> None:
         """
@@ -55,7 +55,7 @@ class AsyncSmartProducer:
         # Create or use health manager
         if health_manager is not None:
             self._health_manager = health_manager
-            logger.info("Using explicitly provided AsyncHealthManager")
+            logger.info("Using explicitly provided AsyncPartitionHealthMonitor")
         else:
             self._health_manager = self._create_health_manager()
 
@@ -93,14 +93,14 @@ class AsyncSmartProducer:
             f"key stickiness: {self._config.key_stickiness}, workers: {max_workers}"
         )
 
-    def _create_health_manager(self) -> Optional["AsyncHealthManager"]:
-        """Create AsyncHealthManager from config if health_manager is configured."""
+    def _create_health_manager(self) -> Optional["AsyncPartitionHealthMonitor"]:
+        """Create AsyncPartitionHealthMonitor if health_manager is configured."""
         if not self._config.health_config:
             return None
 
-        from .async_health_manager import AsyncHealthManager
+        from .async_partition_health_monitor import AsyncPartitionHealthMonitor
 
-        return AsyncHealthManager(
+        return AsyncPartitionHealthMonitor(
             config=self._config.health_config,
             kafka_config=self._config.get_clean_kafka_config(),
         )
@@ -300,7 +300,7 @@ class AsyncSmartProducer:
         return self._config.topics.copy()
 
     @property
-    def health_manager(self) -> Optional["AsyncHealthManager"]:
+    def health_manager(self) -> Optional["AsyncPartitionHealthMonitor"]:
         """Get the health manager instance."""
         return self._health_manager
 

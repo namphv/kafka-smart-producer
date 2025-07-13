@@ -1,5 +1,5 @@
 """
-Synchronous Health Manager using threading for background monitoring.
+Partition Health Monitor using threading for background monitoring.
 """
 
 import json
@@ -26,11 +26,11 @@ CacheBackend = Union["DefaultLocalCache", "DefaultRemoteCache", "DefaultHybridCa
 logger = logging.getLogger(__name__)
 
 
-class SyncHealthManager:
+class PartitionHealthMonitor:
     """
-    Synchronous health manager using threading for background monitoring.
+    Partition health monitor using threading for background monitoring.
 
-    This manager runs background health monitoring using a daemon thread
+    This monitor runs background health monitoring using a daemon thread
     and provides thread-safe access to health data for partition selection.
     """
 
@@ -80,7 +80,7 @@ class SyncHealthManager:
         cache_type = type(cache).__name__ if cache else "in-memory"
         redis_status = "enabled" if redis_health_publisher else "disabled"
         logger.info(
-            f"SyncHealthManager initialized - mode={mode}, "
+            f"PartitionHealthMonitor initialized - mode={mode}, "
             f"threshold={health_threshold}, interval={refresh_interval}s, "
             f"max_lag={max_lag_for_health}, cache={cache_type}, "
             f"redis_publisher={redis_status}"
@@ -89,9 +89,9 @@ class SyncHealthManager:
     @classmethod
     def embedded(
         cls, lag_collector: "LagDataCollector", topics: Optional[List[str]] = None
-    ) -> "SyncHealthManager":
+    ) -> "PartitionHealthMonitor":
         """
-        Create SyncHealthManager for embedded mode (producer integration).
+        Create PartitionHealthMonitor for embedded mode (producer integration).
 
         This factory method creates a lightweight health manager optimized for
         integration with SmartProducer. No Redis publishing, minimal features.
@@ -101,11 +101,11 @@ class SyncHealthManager:
             topics: Optional list of topics to monitor initially
 
         Returns:
-            SyncHealthManager configured for embedded mode
+            PartitionHealthMonitor configured for embedded mode
 
         Example:
             lag_collector = KafkaAdminLagCollector(...)
-            health_manager = SyncHealthManager.embedded(
+            health_manager = PartitionHealthMonitor.embedded(
                 lag_collector, ["orders", "payments"]
             )
         """
@@ -134,9 +134,9 @@ class SyncHealthManager:
         health_threshold: float = 0.5,
         refresh_interval: float = 5.0,
         max_lag_for_health: int = 1000,
-    ) -> "SyncHealthManager":
+    ) -> "PartitionHealthMonitor":
         """
-        Create SyncHealthManager for standalone mode (monitoring service).
+        Create PartitionHealthMonitor for standalone mode (monitoring service).
 
         This factory method creates a full-featured health manager for running
         as an independent monitoring service with Redis publishing.
@@ -150,10 +150,10 @@ class SyncHealthManager:
             max_lag_for_health: Maximum lag for 0.0 health score
 
         Returns:
-            SyncHealthManager configured for standalone mode
+            PartitionHealthMonitor configured for standalone mode
 
         Example:
-            health_manager = SyncHealthManager.standalone(
+            health_manager = PartitionHealthMonitor.standalone(
                 consumer_group="my-consumers",
                 kafka_config={"bootstrap.servers": "localhost:9092"},
                 topics=["orders", "payments"]
@@ -206,16 +206,16 @@ class SyncHealthManager:
     @classmethod
     def from_config(
         cls, health_config: "HealthManagerConfig", kafka_config: Dict[str, Any]
-    ) -> "SyncHealthManager":
+    ) -> "PartitionHealthMonitor":
         """
-        Factory method to create SyncHealthManager from unified configuration.
+        Factory method to create PartitionHealthMonitor from unified configuration.
 
         Args:
             health_config: Health manager configuration
             kafka_config: Producer's Kafka configuration (kafka authentication config)
 
         Returns:
-            Configured SyncHealthManager instance
+            Configured PartitionHealthMonitor instance
 
         Raises:
             ValueError: If configuration is invalid
@@ -278,7 +278,7 @@ class SyncHealthManager:
         Uses a daemon thread for background health monitoring.
         """
         if self._running:
-            logger.warning("SyncHealthManager already running")
+            logger.warning("PartitionHealthMonitor already running")
             return
 
         self._running = True
@@ -287,7 +287,7 @@ class SyncHealthManager:
             target=self._refresh_loop, daemon=True, name="sync-health-manager"
         )
         self._thread.start()
-        logger.info("SyncHealthManager started")
+        logger.info("PartitionHealthMonitor started")
 
     def stop(self) -> None:
         """Stop health monitoring in sync context."""
@@ -300,10 +300,12 @@ class SyncHealthManager:
         if self._thread:
             self._thread.join(timeout=self._refresh_interval + 2.0)
             if self._thread.is_alive():
-                logger.warning("SyncHealthManager thread did not terminate gracefully")
+                logger.warning(
+                    "PartitionHealthMonitor thread did not terminate gracefully"
+                )
             self._thread = None
 
-        logger.info("SyncHealthManager stopped")
+        logger.info("PartitionHealthMonitor stopped")
 
     def get_healthy_partitions(self, topic: str) -> List[int]:
         """
@@ -535,7 +537,7 @@ class SyncHealthManager:
         """Check if health manager is currently running."""
         return self._running
 
-    def __enter__(self) -> "SyncHealthManager":
+    def __enter__(self) -> "PartitionHealthMonitor":
         """Context manager entry."""
         self.start()
         return self
@@ -551,7 +553,7 @@ class SyncHealthManager:
 
     def __repr__(self) -> str:
         return (
-            f"SyncHealthManager("
+            f"PartitionHealthMonitor("
             f"threshold={self._health_threshold}, "
             f"interval={self._refresh_interval}s, "
             f"running={self._running}"

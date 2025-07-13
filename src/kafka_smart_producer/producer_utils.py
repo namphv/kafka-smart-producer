@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING, Optional, Union
 from .caching import CacheFactory
 
 if TYPE_CHECKING:
-    from .async_health_manager import AsyncHealthManager
+    from .async_partition_health_monitor import AsyncPartitionHealthMonitor
     from .caching import DefaultHybridCache, DefaultLocalCache, DefaultRemoteCache
+    from .partition_health_monitor import PartitionHealthMonitor
     from .producer_config import ProducerConfig
-    from .sync_health_manager import SyncHealthManager
 
 # Type aliases
-HealthManagerType = Union["SyncHealthManager", "AsyncHealthManager"]
+HealthManagerType = Union["PartitionHealthMonitor", "AsyncPartitionHealthMonitor"]
 CacheType = Union["DefaultLocalCache", "DefaultRemoteCache", "DefaultHybridCache"]
 
 logger = logging.getLogger(__name__)
@@ -136,24 +136,24 @@ def create_health_manager_from_config(
 
         # Create appropriate health manager
         if manager_type == "sync":
-            from .sync_health_manager import SyncHealthManager
+            from .partition_health_monitor import PartitionHealthMonitor
 
-            health_manager = SyncHealthManager.embedded(
+            health_manager = PartitionHealthMonitor.embedded(
                 lag_collector, topics=config.topics
             )
             logger.info(
-                f"Created SyncHealthManager for embedded mode with "
+                f"Created PartitionHealthMonitor for embedded mode with "
                 f"topics: {config.topics}"
             )
             return health_manager
         else:
-            from .async_health_manager import AsyncHealthManager
+            from .async_partition_health_monitor import AsyncPartitionHealthMonitor
 
-            health_manager = AsyncHealthManager.embedded(
+            health_manager = AsyncPartitionHealthMonitor.embedded(
                 lag_collector, topics=config.topics
             )
             logger.info(
-                f"Created AsyncHealthManager for embedded mode with "
+                f"Created AsyncPartitionHealthMonitor for embedded mode with "
                 f"topics: {config.topics}"
             )
             return health_manager

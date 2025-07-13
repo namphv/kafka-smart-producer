@@ -14,7 +14,7 @@ from .producer_config import ProducerConfig
 from .producer_utils import BasePartitionSelector
 
 if TYPE_CHECKING:
-    from .sync_health_manager import SyncHealthManager
+    from .partition_health_monitor import PartitionHealthMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class SmartProducer:
     def __init__(
         self,
         config: ProducerConfig,
-        health_manager: Optional["SyncHealthManager"] = None,
+        health_manager: Optional["PartitionHealthMonitor"] = None,
     ) -> None:
         """
         Initialize the Smart Producer.
@@ -51,9 +51,17 @@ class SmartProducer:
         # Create or use health manager
         if health_manager is not None:
             self._health_manager = health_manager
-            logger.info("Using explicitly provided SyncHealthManager")
+            self._health_manager_created = (
+                False  # User provided, don't manage lifecycle
+            )
+            logger.info("Using explicitly provided PartitionHealthMonitor")
         else:
             self._health_manager = self._create_health_manager()
+            self._health_manager_created = True  # We created it, we manage lifecycle
+            # Auto-start self-created health manager
+            if self._health_manager and not self._health_manager.is_running:
+                self._health_manager.start()
+                logger.info("Auto-started PartitionHealthMonitor")
 
         # Initialize cache and partition selector
         self._smart_enabled = (
@@ -80,15 +88,15 @@ class SmartProducer:
             f"key stickiness: {self._config.key_stickiness}"
         )
 
-    def _create_health_manager(self) -> Optional["SyncHealthManager"]:
-        """Create SyncHealthManager from config if health_manager is configured."""
+    def _create_health_manager(self) -> Optional["PartitionHealthMonitor"]:
+        """Create PartitionHealthMonitor from config if health_manager is configured."""
         if not self._config.health_config:
             return None
 
-        from .sync_health_manager import SyncHealthManager
+        from .partition_health_monitor import PartitionHealthMonitor
 
-        return SyncHealthManager(
-            config=self._config.health_config,
+        return PartitionHealthMonitor.from_config(
+            health_config=self._config.health_config,
             kafka_config=self._config.get_clean_kafka_config(),
         )
 
@@ -147,9 +155,58 @@ class SmartProducer:
 
         self._producer.produce(**produce_kwargs)
 
-        # Flush to ensure message is delivered immediately
-        # This provides guaranteed delivery for sync producer
-        self._producer.flush()
+        # Poll to trigger delivery callbacks and handle events
+        # Users can call flush() manually for guaranteed delivery
+        self._producer.poll(0)
+
+    def flush(self, timeout: Optional[float] = None) -> int:
+        """
+        Manually flush all queued messages.
+
+        Useful for ensuring all messages are delivered before shutdown.
+
+        Args:
+            timeout: Maximum time to wait for delivery (None = wait indefinitely)
+
+        Returns:
+            Number of messages still in queue after timeout
+        """
+        if timeout is not None:
+            return self._producer.flush(timeout)
+        else:
+            return self._producer.flush()
+
+    def close(self) -> None:
+        """
+        Close the producer and clean up resources.
+
+        This method:
+        1. Flushes any remaining messages
+        2. Stops the health manager if we created it
+        3. Closes the underlying Kafka producer
+
+        Call this before destroying the producer instance.
+        """
+        try:
+            # Flush any remaining messages
+            self._producer.flush()
+
+            # Stop health manager only if we created it (not explicitly provided)
+            if (
+                hasattr(self, "_health_manager")
+                and self._health_manager
+                and hasattr(self, "_health_manager_created")
+                and self._health_manager_created
+                and self._health_manager.is_running
+            ):
+                self._health_manager.stop()
+                logger.info("Stopped PartitionHealthMonitor")
+
+            logger.info("SmartProducer closed successfully")
+
+        except Exception as e:
+            logger.error(f"Error during SmartProducer cleanup: {e}")
+            # Don't raise - cleanup should be best effort
 
     @property
     def topics(self) -> List[str]:
@@ -157,7 +214,7 @@ class SmartProducer:
         return self._config.topics.copy()
 
     @property
-    def health_manager(self) -> Optional["SyncHealthManager"]:
+    def health_manager(self) -> Optional["PartitionHealthMonitor"]:
         """Get the health manager instance."""
         return self._health_manager
 

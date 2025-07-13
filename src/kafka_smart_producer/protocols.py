@@ -7,7 +7,7 @@ monitoring systems and business requirements.
 """
 
 from abc import abstractmethod
-from typing import Any, Dict, Optional, Protocol
+from typing import Dict, Protocol
 
 
 class LagDataCollector(Protocol):
@@ -53,89 +53,5 @@ class LagDataCollector(Protocol):
 
         Returns:
             bool: True if collector can retrieve data, False otherwise
-        """
-        ...
-
-
-class CacheBackend(Protocol):
-    """
-    Protocol for cache backend implementations.
-
-    Supports both local (in-memory) and distributed (Redis) caching
-    with consistent async/sync interfaces.
-
-    Threading Considerations:
-    - Async methods must not block event loop
-    - Sync methods for sync contexts
-    - Thread-safe for concurrent access
-    """
-
-    @abstractmethod
-    async def get(self, key: str) -> Optional[Any]:
-        """
-        Get value from cache asynchronously.
-
-        Args:
-            key: Cache key
-
-        Returns:
-            Cached value or None if not found/expired
-        """
-        ...
-
-    @abstractmethod
-    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        """
-        Set value in cache asynchronously.
-
-        Args:
-            key: Cache key
-            value: Value to cache (must be serializable)
-            ttl: Time-to-live in seconds, None for no expiration
-        """
-        ...
-
-    @abstractmethod
-    async def delete(self, key: str) -> None:
-        """
-        Delete key from cache asynchronously.
-
-        Args:
-            key: Cache key to delete
-        """
-        ...
-
-    @abstractmethod
-    def get_sync(self, key: str) -> Optional[Any]:
-        """
-        Synchronous get for sync contexts.
-
-        Args:
-            key: Cache key
-
-        Returns:
-            Cached value or None if not found/expired
-        """
-        ...
-
-    @abstractmethod
-    def set_sync(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        """
-        Synchronous set for sync contexts.
-
-        Args:
-            key: Cache key
-            value: Value to cache
-            ttl: Time-to-live in seconds
-        """
-        ...
-
-    @abstractmethod
-    def delete_sync(self, key: str) -> None:
-        """
-        Synchronous delete for sync contexts.
-
-        Args:
-            key: Cache key to delete
         """
         ...

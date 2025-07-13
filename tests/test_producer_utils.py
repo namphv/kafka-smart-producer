@@ -103,7 +103,7 @@ class TestCreateHealthManagerFromConfig:
         )
 
         with patch(
-            "kafka_smart_producer.sync_health_manager.SyncHealthManager"
+            "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor"
         ) as mock_sync_hm:
             mock_health_manager = Mock()
             mock_sync_hm.embedded.return_value = mock_health_manager
@@ -141,7 +141,7 @@ class TestCreateHealthManagerFromConfig:
         )
 
         with patch(
-            "kafka_smart_producer.async_health_manager.AsyncHealthManager"
+            "kafka_smart_producer.async_partition_health_monitor.AsyncPartitionHealthMonitor"
         ) as mock_async_hm:
             mock_health_manager = Mock()
             mock_async_hm.embedded.return_value = mock_health_manager
@@ -196,7 +196,9 @@ class TestCreateHealthManagerFromConfig:
             },
         )
 
-        with patch("kafka_smart_producer.sync_health_manager.SyncHealthManager"):
+        with patch(
+            "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor"
+        ):
             with patch(
                 "kafka_smart_producer.lag_collector.KafkaAdminLagCollector"
             ) as mock_collector:

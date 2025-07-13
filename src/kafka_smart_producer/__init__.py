@@ -11,7 +11,7 @@ __author__ = "Your Name"
 __email__ = "your.email@example.com"
 
 # Health management
-from .async_health_manager import AsyncHealthManager
+from .async_partition_health_monitor import AsyncPartitionHealthMonitor
 
 # Main producer classes
 from .async_producer import AsyncSmartProducer
@@ -43,11 +43,11 @@ from .exceptions import (
 
 # Configuration
 from .health_config import HealthManagerConfig
+from .partition_health_monitor import PartitionHealthMonitor
 from .producer_config import ProducerConfig
 
 # Core protocol interfaces
-from .protocols import CacheBackend, LagDataCollector
-from .sync_health_manager import SyncHealthManager
+from .protocols import LagDataCollector
 from .sync_producer import SmartProducer
 
 # # Threading utilities
@@ -65,7 +65,7 @@ from .sync_producer import SmartProducer
 __all__ = [
     # Protocols
     "LagDataCollector",
-    "CacheBackend",
+    # "CacheBackend",
     # Exceptions
     "SmartProducerError",
     "LagDataUnavailableError",
@@ -94,8 +94,8 @@ __all__ = [
     "HealthManagerConfig",
     "ProducerConfig",
     # Health management
-    "SyncHealthManager",
-    "AsyncHealthManager",
+    "PartitionHealthMonitor",
+    "AsyncPartitionHealthMonitor",
     # Producer classes
     "SmartProducer",
     "AsyncSmartProducer",
