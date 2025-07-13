@@ -10,7 +10,7 @@ dependencies = [
     "cachetools>=5.0.0",
 ]
 authors = [
-    {name = "Your Name", email = "your.email@example.com"},
+    {name = "Pham Nam", email = "namph.data@gmail.com"},
 ]
 keywords = ["kafka", "producer", "smart-routing", "partition-selection", "consumer-lag"]
 classifiers = [
@@ -39,9 +39,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/kafka-smart-producer"
-Repository = "https://github.com/yourusername/kafka-smart-producer"
-Issues = "https://github.com/yourusername/kafka-smart-producer/issues"
+Homepage = "https://github.com/namphv/kafka-smart-producer"
+Repository = "https://github.com/namphv/kafka-smart-producer"
+Issues = "https://github.com/namphv/kafka-smart-producer/issues"
 
 [build-system]
 requires = ["hatchling"]

@@ -6,7 +6,7 @@ This example shows how to use the new top-level consumer_group configuration
 for easy setup of health monitoring without complex nested configuration.
 """
 
-from kafka_smart_producer.producer_config import ProducerConfig
+from kafka_smart_producer.producer_config import SmartProducerConfig
 from kafka_smart_producer.sync_producer import SmartProducer
 
 
@@ -15,7 +15,7 @@ def main():
 
     # Method 1: Minimal configuration with top-level consumer_group
     # This automatically creates and starts a PartitionHealthMonitor
-    minimal_config = ProducerConfig.from_dict(
+    minimal_config = SmartProducerConfig.from_dict(
         {
             "bootstrap.servers": "localhost:9092",
             "topics": ["orders", "payments", "inventory"],
@@ -53,7 +53,7 @@ def main():
 
     # Method 2: Advanced configuration with explicit health_manager
     # This gives you full control over health monitoring settings
-    advanced_config = ProducerConfig.from_dict(
+    advanced_config = SmartProducerConfig.from_dict(
         {
             "bootstrap.servers": "localhost:9092",
             "topics": ["orders", "payments"],
