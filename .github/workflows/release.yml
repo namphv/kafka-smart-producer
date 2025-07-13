@@ -56,13 +56,6 @@ jobs:
           name: dist
           path: dist/
 
-      - name: Publish to Test PyPI
-        if: github.event.inputs.test_pypi == 'true'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          verbose: true
-
       - name: Publish to PyPI
         if: github.event.inputs.test_pypi != 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
