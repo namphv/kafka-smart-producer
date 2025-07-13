@@ -6,7 +6,7 @@ enabling the HealthManager to create components from configuration.
 """
 
 import logging
-from typing import Any, Dict, List, Type, Union
+from typing import Any, Union
 
 from .caching import DefaultHybridCache, DefaultLocalCache, DefaultRemoteCache
 from .lag_collector import KafkaAdminLagCollector
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 CacheBackend = Union[DefaultLocalCache, DefaultRemoteCache, DefaultHybridCache]
 
 # --- Lag Collector Registry ---
-_LAG_COLLECTOR_REGISTRY: Dict[str, Type[LagDataCollector]] = {
+_LAG_COLLECTOR_REGISTRY: dict[str, type[LagDataCollector]] = {
     "kafka_admin": KafkaAdminLagCollector,
     # Future collectors can be registered here:
     # "prometheus": PrometheusLagCollector,
@@ -26,7 +26,7 @@ _LAG_COLLECTOR_REGISTRY: Dict[str, Type[LagDataCollector]] = {
 }
 
 
-def register_lag_collector(name: str, collector_class: Type[LagDataCollector]) -> None:
+def register_lag_collector(name: str, collector_class: type[LagDataCollector]) -> None:
     """
     Register a custom lag collector implementation.
 
@@ -46,7 +46,7 @@ def register_lag_collector(name: str, collector_class: Type[LagDataCollector]) -
     logger.info(f"Registered lag collector: {name} -> {collector_class.__name__}")
 
 
-def create_lag_collector(config: Dict[str, Any]) -> LagDataCollector:
+def create_lag_collector(config: dict[str, Any]) -> LagDataCollector:
     """
     Factory function to create a LagDataCollector instance from configuration.
 
@@ -97,7 +97,7 @@ def create_lag_collector(config: Dict[str, Any]) -> LagDataCollector:
 # --- Cache Backend Factory & Adapter ---
 
 
-def get_available_lag_collectors() -> Dict[str, Type[LagDataCollector]]:
+def get_available_lag_collectors() -> dict[str, type[LagDataCollector]]:
     """
     Get all registered lag collector types.
 
@@ -107,7 +107,7 @@ def get_available_lag_collectors() -> Dict[str, Type[LagDataCollector]]:
     return _LAG_COLLECTOR_REGISTRY.copy()
 
 
-def get_available_cache_types() -> List[str]:
+def get_available_cache_types() -> list[str]:
     """
     Get all available cache backend types.
 

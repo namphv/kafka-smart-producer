@@ -7,7 +7,7 @@ backward compatibility with dict-based configs.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .caching import CacheConfig
 from .health_config import HealthManagerConfig
@@ -39,15 +39,15 @@ class SmartProducerConfig:
     """
 
     # Required configuration
-    kafka_config: Dict[str, Any]
-    topics: List[str]
+    kafka_config: dict[str, Any]
+    topics: list[str]
 
     # Optional simplified health monitoring configuration
     consumer_group: Optional[str] = None
 
     # Optional component configurations (user-friendly dict format)
-    health_manager: Optional[Dict[str, Any]] = None
-    cache: Optional[Dict[str, Any]] = None
+    health_manager: Optional[dict[str, Any]] = None
+    cache: Optional[dict[str, Any]] = None
 
     # Producer-level settings with defaults
     smart_enabled: bool = True
@@ -151,7 +151,7 @@ class SmartProducerConfig:
         """Get health manager configuration object (None if not configured)."""
         return self._health_config
 
-    def get_clean_kafka_config(self) -> Dict[str, Any]:
+    def get_clean_kafka_config(self) -> dict[str, Any]:
         """
         Get clean Kafka configuration without Smart Producer specific keys.
 
@@ -193,7 +193,7 @@ class SmartProducerConfig:
         }
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> "SmartProducerConfig":
+    def from_dict(cls, config_dict: dict[str, Any]) -> "SmartProducerConfig":
         """
         Create SmartProducerConfig from a dictionary (backward compatibility).
 
@@ -244,7 +244,7 @@ class SmartProducerConfig:
             key_stickiness=key_stickiness,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert SmartProducerConfig back to dictionary format.
 

@@ -6,7 +6,7 @@ import json
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from .health_config import HealthManagerConfig
 from .health_mode import HealthMode
@@ -68,8 +68,8 @@ class PartitionHealthMonitor:
 
         # Thread-safe health data storage
         # Format: {topic: {partition_id: health_score}}
-        self._health_data: Dict[str, Dict[int, float]] = {}
-        self._last_refresh: Dict[str, float] = {}
+        self._health_data: dict[str, dict[int, float]] = {}
+        self._last_refresh: dict[str, float] = {}
         self._lock = threading.Lock()
 
         # Threading control
@@ -88,7 +88,7 @@ class PartitionHealthMonitor:
 
     @classmethod
     def embedded(
-        cls, lag_collector: "LagDataCollector", topics: Optional[List[str]] = None
+        cls, lag_collector: "LagDataCollector", topics: Optional[list[str]] = None
     ) -> "PartitionHealthMonitor":
         """
         Create PartitionHealthMonitor for embedded mode (producer integration).
@@ -129,8 +129,8 @@ class PartitionHealthMonitor:
     def standalone(
         cls,
         consumer_group: str,
-        kafka_config: Dict[str, Any],
-        topics: Optional[List[str]] = None,
+        kafka_config: dict[str, Any],
+        topics: Optional[list[str]] = None,
         health_threshold: float = 0.5,
         refresh_interval: float = 5.0,
         max_lag_for_health: int = 1000,
@@ -205,7 +205,7 @@ class PartitionHealthMonitor:
 
     @classmethod
     def from_config(
-        cls, health_config: "HealthManagerConfig", kafka_config: Dict[str, Any]
+        cls, health_config: "HealthManagerConfig", kafka_config: dict[str, Any]
     ) -> "PartitionHealthMonitor":
         """
         Factory method to create PartitionHealthMonitor from unified configuration.
@@ -307,7 +307,7 @@ class PartitionHealthMonitor:
 
         logger.info("PartitionHealthMonitor stopped")
 
-    def get_healthy_partitions(self, topic: str) -> List[int]:
+    def get_healthy_partitions(self, topic: str) -> list[int]:
         """
         Get list of healthy partitions for a topic.
 
@@ -350,7 +350,7 @@ class PartitionHealthMonitor:
 
         return health_score >= self._health_threshold
 
-    def get_health_summary(self) -> Dict[str, Any]:
+    def get_health_summary(self) -> dict[str, Any]:
         """
         Get current health summary for monitoring/debugging.
 
@@ -389,7 +389,7 @@ class PartitionHealthMonitor:
 
         return summary
 
-    def _initialize_topics(self, topics: List[str]) -> None:
+    def _initialize_topics(self, topics: list[str]) -> None:
         """
         Initialize health monitoring for a list of topics.
 
@@ -481,7 +481,7 @@ class PartitionHealthMonitor:
             except Exception as e:
                 logger.warning(f"Failed to refresh health for topic '{topic}': {e}")
 
-    def _publish_to_redis(self, topic: str, health_data: Dict[int, float]) -> None:
+    def _publish_to_redis(self, topic: str, health_data: dict[int, float]) -> None:
         """
         Publish health data to Redis for standalone mode.
 
@@ -544,7 +544,7 @@ class PartitionHealthMonitor:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_val: Optional[BaseException],
         exc_tb: Any,
     ) -> None:

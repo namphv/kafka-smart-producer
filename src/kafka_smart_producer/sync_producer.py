@@ -6,7 +6,7 @@ selection based on consumer health monitoring.
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from confluent_kafka import Producer as ConfluentProducer
 
@@ -114,7 +114,7 @@ class SmartProducer:
         partition: Optional[int] = None,
         on_delivery: Optional[Callable[..., None]] = None,
         timestamp: Optional[int] = None,
-        headers: Optional[Dict[str, bytes]] = None,
+        headers: Optional[dict[str, bytes]] = None,
     ) -> None:
         """
         Produce a message with intelligent partition selection.
@@ -209,7 +209,7 @@ class SmartProducer:
             # Don't raise - cleanup should be best effort
 
     @property
-    def topics(self) -> List[str]:
+    def topics(self) -> list[str]:
         """Get the topics this producer is configured for."""
         return self._config.topics.copy()
 

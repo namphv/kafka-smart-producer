@@ -3,7 +3,7 @@ Shared utility functions for health calculation and data processing.
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 if TYPE_CHECKING:
     from .caching import DefaultHybridCache, DefaultLocalCache, DefaultRemoteCache
@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 def calculate_health_scores(
-    lag_data: Dict[int, int], max_lag_for_health: int
-) -> Dict[int, float]:
+    lag_data: dict[int, int], max_lag_for_health: int
+) -> dict[int, float]:
     """
     Calculate health scores from lag data using linear scaling.
 
@@ -45,8 +45,8 @@ def calculate_health_scores(
 
 
 def filter_healthy_partitions(
-    health_scores: Dict[int, float], health_threshold: float
-) -> List[int]:
+    health_scores: dict[int, float], health_threshold: float
+) -> list[int]:
     """
     Filter partitions that meet the health threshold.
 
@@ -66,7 +66,7 @@ def filter_healthy_partitions(
 
 def collect_and_calculate_health(
     lag_collector: "LagDataCollector", topic: str, max_lag_for_health: int
-) -> Dict[int, float]:
+) -> dict[int, float]:
     """
     Collect lag data and calculate health scores for a topic.
 
@@ -107,7 +107,7 @@ def collect_and_calculate_health(
 
 
 def create_lag_collector_from_config(
-    health_config: "HealthManagerConfig", kafka_config: Dict[str, Any]
+    health_config: "HealthManagerConfig", kafka_config: dict[str, Any]
 ) -> "LagDataCollector":
     """
     Create lag collector from configuration.

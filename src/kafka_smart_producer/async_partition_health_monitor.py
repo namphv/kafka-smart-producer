@@ -7,7 +7,8 @@ import json
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, List, Optional, Type, Union
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from .health_config import HealthManagerConfig
 from .health_mode import HealthMode
@@ -70,8 +71,8 @@ class AsyncPartitionHealthMonitor:
 
         # Dual-safe health data storage (both thread-safe and async-safe)
         # Format: {topic: {partition_id: health_score}}
-        self._health_data: Dict[str, Dict[int, float]] = {}
-        self._last_refresh: Dict[str, float] = {}
+        self._health_data: dict[str, dict[int, float]] = {}
+        self._last_refresh: dict[str, float] = {}
 
         # Dual locking strategy for hybrid sync/async access
         self._thread_lock = (
@@ -80,7 +81,7 @@ class AsyncPartitionHealthMonitor:
         self._async_lock = asyncio.Lock()  # For event loop operations
 
         # Health streams for reactive patterns
-        self._health_streams: Dict[str, asyncio.Queue[Dict[int, float]]] = {}
+        self._health_streams: dict[str, asyncio.Queue[dict[int, float]]] = {}
 
         # Asyncio control
         self._task: Optional[asyncio.Task[None]] = None
@@ -97,7 +98,7 @@ class AsyncPartitionHealthMonitor:
 
     @classmethod
     def embedded(
-        cls, lag_collector: "LagDataCollector", topics: Optional[List[str]] = None
+        cls, lag_collector: "LagDataCollector", topics: Optional[list[str]] = None
     ) -> "AsyncPartitionHealthMonitor":
         """
         Create AsyncPartitionHealthMonitor for embedded mode (producer integration).
@@ -138,8 +139,8 @@ class AsyncPartitionHealthMonitor:
     async def standalone(
         cls,
         consumer_group: str,
-        kafka_config: Dict[str, Any],
-        topics: Optional[List[str]] = None,
+        kafka_config: dict[str, Any],
+        topics: Optional[list[str]] = None,
         health_threshold: float = 0.5,
         refresh_interval: float = 5.0,
         max_lag_for_health: int = 1000,
@@ -214,7 +215,7 @@ class AsyncPartitionHealthMonitor:
 
     @classmethod
     def from_config(
-        cls, health_config: "HealthManagerConfig", kafka_config: Dict[str, Any]
+        cls, health_config: "HealthManagerConfig", kafka_config: dict[str, Any]
     ) -> "AsyncPartitionHealthMonitor":
         """
         Factory method to create AsyncPartitionHealthMonitor from unified configuration.
@@ -327,7 +328,7 @@ class AsyncPartitionHealthMonitor:
 
         logger.info("AsyncPartitionHealthMonitor stopped")
 
-    def get_healthy_partitions(self, topic: str) -> List[int]:
+    def get_healthy_partitions(self, topic: str) -> list[int]:
         """
         Get list of healthy partitions for a topic.
 
@@ -372,7 +373,7 @@ class AsyncPartitionHealthMonitor:
 
         return health_score >= self._health_threshold
 
-    async def get_health_summary(self) -> Dict[str, Any]:
+    async def get_health_summary(self) -> dict[str, Any]:
         """
         Get current health summary for monitoring/debugging.
 
@@ -426,7 +427,7 @@ class AsyncPartitionHealthMonitor:
 
         return summary
 
-    def _initialize_topics(self, topics: List[str]) -> None:
+    def _initialize_topics(self, topics: list[str]) -> None:
         """
         Initialize health monitoring for a list of topics.
 
@@ -439,7 +440,7 @@ class AsyncPartitionHealthMonitor:
                     self._health_data[topic] = {}
                     # Create health stream for reactive patterns
                     if topic not in self._health_streams:
-                        self._health_streams[topic] = asyncio.Queue[Dict[int, float]](
+                        self._health_streams[topic] = asyncio.Queue[dict[int, float]](
                             maxsize=100
                         )
                     logger.info(f"Initialized health monitoring for topic '{topic}'")
@@ -498,7 +499,7 @@ class AsyncPartitionHealthMonitor:
         except Exception as e:
             logger.debug(f"Force refresh (threadsafe) failed for topic '{topic}': {e}")
 
-    async def start_monitoring(self, topics: List[str]) -> None:
+    async def start_monitoring(self, topics: list[str]) -> None:
         """
         Start concurrent monitoring of multiple topics.
 
@@ -520,7 +521,7 @@ class AsyncPartitionHealthMonitor:
                     if topic not in self._health_data:
                         self._health_data[topic] = {}
                     if topic not in self._health_streams:
-                        self._health_streams[topic] = asyncio.Queue[Dict[int, float]](
+                        self._health_streams[topic] = asyncio.Queue[dict[int, float]](
                             maxsize=100
                         )
 
@@ -528,7 +529,7 @@ class AsyncPartitionHealthMonitor:
         self._task = asyncio.create_task(self._monitor_all_topics(topics))
         logger.info(f"Started concurrent monitoring for {len(topics)} topics")
 
-    async def _monitor_all_topics(self, topics: List[str]) -> None:
+    async def _monitor_all_topics(self, topics: list[str]) -> None:
         """Concurrent monitoring of all topics - THIS IS THE ASYNC VALUE!"""
         logger.debug("Starting concurrent topic monitoring")
 
@@ -576,7 +577,7 @@ class AsyncPartitionHealthMonitor:
 
         logger.debug("Async health refresh loop finished")
 
-    async def _refresh_all_topics_concurrent(self, topics: List[str]) -> None:
+    async def _refresh_all_topics_concurrent(self, topics: list[str]) -> None:
         """Refresh all topics concurrently - MAJOR ASYNC VALUE ADD!"""
         if not topics:
             return
@@ -609,7 +610,7 @@ class AsyncPartitionHealthMonitor:
             except Exception as e:
                 logger.warning(f"Failed to refresh health for topic '{topic}': {e}")
 
-    async def _refresh_single_topic(self, topic: str) -> Dict[int, float]:
+    async def _refresh_single_topic(self, topic: str) -> dict[int, float]:
         """Refresh health data for a single topic."""
         try:
             # Support both sync and async lag collectors - THIS IS PHASE 5!
@@ -672,7 +673,7 @@ class AsyncPartitionHealthMonitor:
         await self.start()
         return self
 
-    async def health_stream(self, topic: str) -> AsyncIterator[Dict[int, float]]:
+    async def health_stream(self, topic: str) -> AsyncIterator[dict[int, float]]:
         """
         Stream real-time health updates for a topic.
 
@@ -723,7 +724,7 @@ class AsyncPartitionHealthMonitor:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_val: Optional[BaseException],
         exc_tb: Any,
     ) -> None:
@@ -734,7 +735,7 @@ class AsyncPartitionHealthMonitor:
     # Users can achieve batch operations using asyncio.gather() if needed
 
     async def _publish_to_redis(
-        self, topic: str, health_data: Dict[int, float]
+        self, topic: str, health_data: dict[int, float]
     ) -> None:
         """
         Publish health data to Redis for standalone mode.

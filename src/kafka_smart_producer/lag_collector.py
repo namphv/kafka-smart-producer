@@ -6,7 +6,7 @@ using the confluent-kafka-python AdminClient to fetch consumer lag data.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from confluent_kafka import Consumer, TopicPartition
 from confluent_kafka.admin import AdminClient
@@ -66,7 +66,7 @@ class KafkaAdminLagCollector:
             f"on {bootstrap_servers}"
         )
 
-    def get_lag_data(self, topic: str) -> Dict[int, int]:
+    def get_lag_data(self, topic: str) -> dict[int, int]:
         """
         Get current lag for all partitions of a topic.
 
@@ -117,7 +117,7 @@ class KafkaAdminLagCollector:
                 },
             ) from e
 
-    def _get_topic_partitions(self, topic: str) -> List[int]:
+    def _get_topic_partitions(self, topic: str) -> list[int]:
         """Get list of partition IDs for a topic."""
         try:
             # Get topic metadata
@@ -139,8 +139,8 @@ class KafkaAdminLagCollector:
             ) from e
 
     def _get_committed_offsets(
-        self, topic: str, partitions: List[int]
-    ) -> Dict[int, int]:
+        self, topic: str, partitions: list[int]
+    ) -> dict[int, int]:
         """Get committed offsets for consumer group."""
         try:
             # Create TopicPartition objects
@@ -176,8 +176,8 @@ class KafkaAdminLagCollector:
             ) from e
 
     def _get_high_water_marks(
-        self, topic: str, partitions: List[int]
-    ) -> Dict[int, int]:
+        self, topic: str, partitions: list[int]
+    ) -> dict[int, int]:
         """Get high water marks for all partitions."""
         try:
             # Create temporary consumer to get watermarks

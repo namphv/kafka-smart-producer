@@ -6,7 +6,7 @@ sync and async health managers, with optional context-specific customization.
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -47,8 +47,8 @@ class HealthManagerConfig:
     cache_ttl_seconds: int = 300
 
     # Context-specific configuration (optional)
-    sync_options: Optional[Dict[str, Any]] = None
-    async_options: Optional[Dict[str, Any]] = None
+    sync_options: Optional[dict[str, Any]] = None
+    async_options: Optional[dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""

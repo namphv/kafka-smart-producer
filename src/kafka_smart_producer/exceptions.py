@@ -5,7 +5,7 @@ Exception hierarchy designed for specific error handling and
 diagnostic information capture.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 
 class SmartProducerError(Exception):
@@ -19,7 +19,7 @@ class SmartProducerError(Exception):
         self,
         message: str,
         cause: Optional[Exception] = None,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[dict[str, Any]] = None,
     ):
         super().__init__(message)
         self.cause = cause

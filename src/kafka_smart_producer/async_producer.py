@@ -8,7 +8,7 @@ selection based on consumer health monitoring.
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from confluent_kafka import Producer as ConfluentProducer
 
@@ -119,7 +119,7 @@ class AsyncSmartProducer:
         partition: Optional[int] = None,
         on_delivery: Optional[Callable[..., None]] = None,
         timestamp: Optional[int] = None,
-        headers: Optional[Dict[str, bytes]] = None,
+        headers: Optional[dict[str, bytes]] = None,
     ) -> None:
         """
         Produce a message asynchronously with intelligent partition selection.
@@ -295,7 +295,7 @@ class AsyncSmartProducer:
             self._executor.shutdown(wait=True)
 
     @property
-    def topics(self) -> List[str]:
+    def topics(self) -> list[str]:
         """Get the topics this producer is configured for."""
         return self._config.topics.copy()
 

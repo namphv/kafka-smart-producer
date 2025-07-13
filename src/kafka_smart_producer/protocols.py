@@ -7,7 +7,7 @@ monitoring systems and business requirements.
 """
 
 from abc import abstractmethod
-from typing import Dict, Protocol
+from typing import Protocol
 
 
 class LagDataCollector(Protocol):
@@ -24,7 +24,7 @@ class LagDataCollector(Protocol):
     """
 
     @abstractmethod
-    def get_lag_data(self, topic: str) -> Dict[int, int]:
+    def get_lag_data(self, topic: str) -> dict[int, int]:
         """
         Collect consumer lag data for all partitions of a topic.
 

@@ -9,7 +9,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from cachetools import LRUCache
 
@@ -342,7 +342,7 @@ class CacheFactory:
     """Factory for creating configured cache instances."""
 
     @staticmethod
-    def create_local_cache(smart_config: Dict[str, Any]) -> "DefaultLocalCache":
+    def create_local_cache(smart_config: dict[str, Any]) -> "DefaultLocalCache":
         """Create standalone local cache instance."""
         cache_config = CacheConfig(
             local_max_size=smart_config.get("cache_max_size", 1000),
@@ -352,7 +352,7 @@ class CacheFactory:
 
     @staticmethod
     def create_remote_cache(
-        smart_config: Dict[str, Any],
+        smart_config: dict[str, Any],
     ) -> Optional["DefaultRemoteCache"]:
         """Create standalone remote cache instance if configuration is valid."""
         try:
@@ -425,7 +425,7 @@ class CacheFactory:
 
     @staticmethod
     def create_hybrid_cache(
-        smart_config: Dict[str, Any], enable_redis: bool = True
+        smart_config: dict[str, Any], enable_redis: bool = True
     ) -> "DefaultHybridCache":
         """Create hybrid cache - remote cache is required."""
         if not enable_redis:
