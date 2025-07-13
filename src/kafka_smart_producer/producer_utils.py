@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from .async_partition_health_monitor import AsyncPartitionHealthMonitor
     from .caching import DefaultHybridCache, DefaultLocalCache, DefaultRemoteCache
     from .partition_health_monitor import PartitionHealthMonitor
-    from .producer_config import ProducerConfig
+    from .producer_config import SmartProducerConfig
 
 # Type aliases
 HealthManagerType = Union["PartitionHealthMonitor", "AsyncPartitionHealthMonitor"]
@@ -23,9 +23,9 @@ CacheType = Union["DefaultLocalCache", "DefaultRemoteCache", "DefaultHybridCache
 logger = logging.getLogger(__name__)
 
 
-def create_cache_from_config(config: "ProducerConfig") -> Optional[CacheType]:
+def create_cache_from_config(config: "SmartProducerConfig") -> Optional[CacheType]:
     """
-    Create cache instance based on ProducerConfig.
+    Create cache instance based on SmartProducerConfig.
 
     Args:
         config: Producer configuration
@@ -101,10 +101,10 @@ def create_cache_from_config(config: "ProducerConfig") -> Optional[CacheType]:
 
 
 def create_health_manager_from_config(
-    config: "ProducerConfig", manager_type: str = "sync"
+    config: "SmartProducerConfig", manager_type: str = "sync"
 ) -> Optional[HealthManagerType]:
     """
-    Create health manager from ProducerConfig.
+    Create health manager from SmartProducerConfig.
 
     Args:
         config: Producer configuration
