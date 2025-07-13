@@ -251,3 +251,62 @@ class TestHealthManagerLifecycleFixes:
                     # Should flush and stop health manager
                     mock_producer_instance.flush.assert_called_once()
                     mock_health_manager.stop.assert_called_once()
+
+    def test_minimal_config_auto_starts_health_monitoring(self):
+        """Test that minimal config automatically starts background health monitoring.
+        
+        This test verifies that with just kafka config, topics, and consumer_group,
+        the producer will:
+        1. Auto-create and start a PartitionHealthMonitor
+        2. Use it for intelligent partition selection
+        3. Return healthy partitions from background monitoring
+        4. Clean up properly on close()
+        """
+        # Minimal config - just kafka, topics, and consumer_group
+        minimal_config = ProducerConfig.from_dict({
+            "bootstrap.servers": "localhost:9092",
+            "topics": ["orders", "payments"],
+            "health_manager": {
+                "consumer_group": "order-processors"
+            }
+        })
+
+        with patch("kafka_smart_producer.sync_producer.ConfluentProducer") as mock_confluent:
+            mock_confluent.return_value = Mock()
+            
+            with patch("kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor.from_config") as mock_from_config:
+                # Mock health manager that will return healthy partitions
+                mock_health_manager = Mock()
+                mock_health_manager.is_running = False
+                mock_health_manager.get_healthy_partitions.return_value = [0, 1, 2]
+                mock_from_config.return_value = mock_health_manager
+
+                # Create producer with minimal config
+                producer = SmartProducer(minimal_config)
+
+                # Health manager should be auto-started
+                mock_health_manager.start.assert_called_once()
+                
+                # Simulate that health manager is now running after start
+                mock_health_manager.is_running = True
+                
+                # Producer should be smart-enabled
+                assert producer.smart_enabled is True
+                assert producer.health_manager is mock_health_manager
+                
+                # Should be able to get healthy partitions from background monitoring
+                healthy_partitions = producer.health_manager.get_healthy_partitions("orders")
+                assert healthy_partitions == [0, 1, 2]
+                
+                # Produce a message - should use smart partitioning
+                producer.produce(topic="orders", value=b"test-order", key=b"customer-123")
+                
+                # Should have called the underlying producer with partition selection
+                mock_confluent.return_value.produce.assert_called_once()
+                call_kwargs = mock_confluent.return_value.produce.call_args[1]
+                assert "partition" in call_kwargs  # Smart partitioning applied
+                assert call_kwargs["partition"] in [0, 1, 2]  # Used healthy partition
+                
+                # Cleanup should stop the health manager
+                producer.close()
+                mock_health_manager.stop.assert_called_once()
