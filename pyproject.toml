@@ -1,6 +1,6 @@
 [project]
 name = "kafka-smart-producer"
-version = "0.1.0"
+version = "0.0.1"
 description = "Intelligent Kafka producer with real-time, lag-aware partition selection"
 readme = "README.md"
 requires-python = ">=3.9"
