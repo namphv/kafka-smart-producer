@@ -6,7 +6,6 @@ delivery callbacks, and integration with the health manager.
 """
 
 import asyncio
-from typing import Dict, List
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -18,7 +17,7 @@ from kafka_smart_producer.producer_config import SmartProducerConfig
 class MockHealthManager:
     """Mock health manager for testing."""
 
-    def __init__(self, healthy_partitions: Dict[str, List[int]]):
+    def __init__(self, healthy_partitions: dict[str, list[int]]):
         self._healthy_partitions = healthy_partitions
         self._selection_calls = []
         self._health_check_calls = []

@@ -6,7 +6,7 @@ including mock implementations, edge cases, and performance validation.
 """
 
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import pytest
 
@@ -22,12 +22,12 @@ class MockLagDataCollector:
     different scenarios including failures and edge cases.
     """
 
-    def __init__(self, lag_data: Dict[int, int], is_healthy: bool = True):
+    def __init__(self, lag_data: dict[int, int], is_healthy: bool = True):
         self._lag_data = lag_data.copy()
         self._is_healthy = is_healthy
         self._call_count = 0
 
-    async def get_lag_data(self, topic: str) -> Dict[int, int]:
+    async def get_lag_data(self, topic: str) -> dict[int, int]:
         """Async lag data retrieval with failure simulation."""
         self._call_count += 1
         if not self._is_healthy:
@@ -37,7 +37,7 @@ class MockLagDataCollector:
             )
         return self._lag_data.copy()
 
-    def get_lag_data_sync(self, topic: str) -> Dict[int, int]:
+    def get_lag_data_sync(self, topic: str) -> dict[int, int]:
         """Sync lag data retrieval with failure simulation."""
         self._call_count += 1
         if not self._is_healthy:
@@ -68,8 +68,8 @@ class MockCacheBackend:
     """
 
     def __init__(self, simulate_failures: bool = False):
-        self._data: Dict[str, Any] = {}
-        self._ttl: Dict[str, float] = {}
+        self._data: dict[str, Any] = {}
+        self._ttl: dict[str, float] = {}
         self._simulate_failures = simulate_failures
         self._call_count = 0
 

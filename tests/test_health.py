@@ -10,7 +10,7 @@ and background refresh operations.
 import asyncio
 import logging
 import time
-from typing import Dict, Optional
+from typing import Optional
 
 import pytest
 
@@ -29,7 +29,7 @@ class MockLagDataCollector:
 
     def __init__(
         self,
-        lag_data: Optional[Dict[str, Dict[int, int]]] = None,
+        lag_data: Optional[dict[str, dict[int, int]]] = None,
         should_fail: bool = False,
     ):
         self.lag_data = lag_data or {}
@@ -37,7 +37,7 @@ class MockLagDataCollector:
         self.call_count = 0
         self.calls = []
 
-    def get_lag_data(self, topic: str) -> Dict[int, int]:
+    def get_lag_data(self, topic: str) -> dict[int, int]:
         """Sync method used by both sync and async health managers."""
         self.call_count += 1
         self.calls.append(("sync", topic))
@@ -123,7 +123,7 @@ class TestPartitionHealthMonitor:
 
     def create_sync_health_manager(
         self,
-        lag_data: Optional[Dict[str, Dict[int, int]]] = None,
+        lag_data: Optional[dict[str, dict[int, int]]] = None,
         config: Optional[HealthManagerConfig] = None,
     ) -> PartitionHealthMonitor:
         """Create a sync health manager with mock dependencies."""
@@ -259,7 +259,7 @@ class TestAsyncPartitionHealthMonitor:
 
     def create_async_health_manager(
         self,
-        lag_data: Optional[Dict[str, Dict[int, int]]] = None,
+        lag_data: Optional[dict[str, dict[int, int]]] = None,
         config: Optional[HealthManagerConfig] = None,
     ) -> AsyncPartitionHealthMonitor:
         """Create an async health manager with mock dependencies."""

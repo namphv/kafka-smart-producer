@@ -6,7 +6,6 @@ This module tests the core functionality without complex mocking.
 
 import logging
 import time
-from typing import Dict, List
 
 from kafka_smart_producer.producer_config import SmartProducerConfig
 
@@ -18,7 +17,7 @@ logger = logging.getLogger(__name__)
 class MockHealthManager:
     """Mock health manager for testing."""
 
-    def __init__(self, healthy_partitions: Dict[str, List[int]]):
+    def __init__(self, healthy_partitions: dict[str, list[int]]):
         self._healthy_partitions = healthy_partitions
         self._selection_calls = []
         self._health_check_calls = []
