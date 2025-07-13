@@ -44,7 +44,7 @@ from .exceptions import (
 # Configuration
 from .health_config import HealthManagerConfig
 from .partition_health_monitor import PartitionHealthMonitor
-from .producer_config import ProducerConfig
+from .producer_config import SmartProducerConfig
 
 # Core protocol interfaces
 from .protocols import LagDataCollector
@@ -92,7 +92,7 @@ __all__ = [
     # "create_sync_background_refresh",
     # Configuration
     "HealthManagerConfig",
-    "ProducerConfig",
+    "SmartProducerConfig",
     # Health management
     "PartitionHealthMonitor",
     "AsyncPartitionHealthMonitor",

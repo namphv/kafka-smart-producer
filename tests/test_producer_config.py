@@ -1,7 +1,7 @@
 """
-Tests for ProducerConfig facade pattern and unified configuration.
+Tests for SmartProducerConfig facade pattern and unified configuration.
 
-This module tests the ProducerConfig class that implements the facade pattern
+This module tests the SmartProducerConfig class that implements the facade pattern
 for managing CacheConfig and HealthManagerConfig internally.
 """
 
@@ -9,15 +9,15 @@ import pytest
 
 from kafka_smart_producer.caching import CacheConfig
 from kafka_smart_producer.health_config import HealthManagerConfig
-from kafka_smart_producer.producer_config import ProducerConfig
+from kafka_smart_producer.producer_config import SmartProducerConfig
 
 
-class TestProducerConfig:
-    """Test ProducerConfig facade pattern and validation."""
+class TestSmartProducerConfig:
+    """Test SmartProducerConfig facade pattern and validation."""
 
     def test_basic_initialization(self):
-        """Test basic ProducerConfig initialization."""
-        config = ProducerConfig(
+        """Test basic SmartProducerConfig initialization."""
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"}, topics=["test-topic"]
         )
 
@@ -34,7 +34,7 @@ class TestProducerConfig:
 
     def test_with_health_manager_dict(self):
         """Test initialization with health manager configuration as dict."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["orders"],
             health_manager={
@@ -53,7 +53,7 @@ class TestProducerConfig:
 
     def test_with_cache_dict(self):
         """Test initialization with cache configuration as dict."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["events"],
             cache={
@@ -90,7 +90,7 @@ class TestProducerConfig:
             "key_stickiness": False,
         }
 
-        config = ProducerConfig.from_dict(legacy_config)
+        config = SmartProducerConfig.from_dict(legacy_config)
 
         assert config.kafka_config == {"bootstrap.servers": "localhost:9092"}
         assert config.topics == ["legacy-topic"]
@@ -105,7 +105,7 @@ class TestProducerConfig:
 
     def test_get_clean_kafka_config(self):
         """Test that smart producer fields are filtered out of Kafka config."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={
                 "bootstrap.servers": "localhost:9092",
                 "security.protocol": "SASL_SSL",
@@ -133,13 +133,13 @@ class TestProducerConfig:
     def test_cache_config_remote_enabled_property(self):
         """Test cache config remote_enabled property."""
         # Local cache only (default)
-        config1 = ProducerConfig(
+        config1 = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"}, topics=["test"]
         )
         assert config1.cache_config.remote_enabled is False
 
         # Remote cache enabled
-        config2 = ProducerConfig(
+        config2 = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["test"],
             cache={"remote_enabled": True},
@@ -147,7 +147,7 @@ class TestProducerConfig:
         assert config2.cache_config.remote_enabled is True
 
         # Explicit local mode even with remote config
-        config3 = ProducerConfig(
+        config3 = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["test"],
             cache={"remote_enabled": False},
@@ -156,8 +156,8 @@ class TestProducerConfig:
 
     def test_invalid_kafka_config(self):
         """Test that kafka_config dict validation passes through."""
-        # ProducerConfig doesn't validate kafka config contents
-        config = ProducerConfig(
+        # SmartProducerConfig doesn't validate kafka config contents
+        config = SmartProducerConfig(
             kafka_config={"client.id": "test"},  # Missing bootstrap.servers is ok
             topics=["test"],
         )
@@ -166,14 +166,14 @@ class TestProducerConfig:
     def test_empty_topics(self):
         """Test validation of topics list."""
         with pytest.raises(ValueError, match="topics must be a non-empty list"):
-            ProducerConfig(
+            SmartProducerConfig(
                 kafka_config={"bootstrap.servers": "localhost:9092"}, topics=[]
             )
 
     def test_health_manager_config_passes_through(self):
         """Test that health manager config is passed through without validation."""
-        # ProducerConfig doesn't validate the content, just stores it
-        config = ProducerConfig(
+        # SmartProducerConfig doesn't validate the content, just stores it
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["test"],
             health_manager={"consumer_group": 123},  # Will be passed through
@@ -182,9 +182,9 @@ class TestProducerConfig:
 
     def test_cache_config_validation_error(self):
         """Test that invalid cache config raises error during CacheConfig creation."""
-        # ProducerConfig validates by creating CacheConfig
+        # SmartProducerConfig validates by creating CacheConfig
         with pytest.raises(TypeError):
-            ProducerConfig(
+            SmartProducerConfig(
                 kafka_config={"bootstrap.servers": "localhost:9092"},
                 topics=["test"],
                 cache={"local_max_size": "invalid"},  # Will fail CacheConfig validation
@@ -192,7 +192,7 @@ class TestProducerConfig:
 
     def test_config_immutability(self):
         """Test that internal configs are immutable (frozen dataclasses)."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["test"],
             cache={"local_max_size": 1000},
@@ -204,7 +204,7 @@ class TestProducerConfig:
 
     def test_health_config_creation_with_defaults(self):
         """Test health config creation with default values."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["test"],
             health_manager={"consumer_group": "test-group"},
@@ -217,7 +217,7 @@ class TestProducerConfig:
 
     def test_cache_config_creation_with_defaults(self):
         """Test cache config creation with default values."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"}, topics=["test"]
         )
 
@@ -230,7 +230,7 @@ class TestProducerConfig:
 
     def test_complex_configuration_scenario(self):
         """Test complex configuration with all options."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={
                 "bootstrap.servers": "kafka1:9092,kafka2:9092",
                 "security.protocol": "SASL_SSL",
@@ -284,15 +284,15 @@ class TestProducerConfig:
         assert clean_config["bootstrap.servers"] == "kafka1:9092,kafka2:9092"
 
     def test_repr_string(self):
-        """Test string representation of ProducerConfig."""
-        config = ProducerConfig(
+        """Test string representation of SmartProducerConfig."""
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["test-topic"],
             smart_enabled=False,
         )
 
         repr_str = repr(config)
-        assert "ProducerConfig" in repr_str
+        assert "SmartProducerConfig" in repr_str
         assert "test-topic" in repr_str
         assert "smart_enabled=False" in repr_str
         assert "cache_config=" in repr_str

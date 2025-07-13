@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kafka_smart_producer.producer_config import ProducerConfig
+from kafka_smart_producer.producer_config import SmartProducerConfig
 from kafka_smart_producer.sync_producer import SmartProducer
 
 
@@ -16,7 +16,7 @@ class TestSimpleHealthManagerLifecycle:
     @pytest.fixture
     def health_config(self):
         """Config with health manager enabled."""
-        return ProducerConfig.from_dict(
+        return SmartProducerConfig.from_dict(
             {
                 "bootstrap.servers": "localhost:9092",
                 "topics": ["test-topic"],
@@ -32,7 +32,7 @@ class TestSimpleHealthManagerLifecycle:
     @pytest.fixture
     def no_health_config(self):
         """Config with no health manager."""
-        return ProducerConfig.from_dict(
+        return SmartProducerConfig.from_dict(
             {
                 "bootstrap.servers": "localhost:9092",
                 "topics": ["test-topic"],

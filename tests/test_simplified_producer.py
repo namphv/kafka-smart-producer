@@ -8,7 +8,7 @@ import logging
 import time
 from typing import Dict, List
 
-from kafka_smart_producer.producer_config import ProducerConfig
+from kafka_smart_producer.producer_config import SmartProducerConfig
 
 # Test the internal logic components independently
 
@@ -44,7 +44,7 @@ class TestProducerComponents:
     """Test individual components of the producer."""
 
     def test_producer_config_handling(self):
-        """Test ProducerConfig creation and clean Kafka config extraction."""
+        """Test SmartProducerConfig creation and clean Kafka config extraction."""
         config_dict = {
             "bootstrap.servers": "localhost:9092",
             "topics": ["test-topic"],
@@ -53,8 +53,8 @@ class TestProducerComponents:
             "cache": {"local_max_size": 100, "local_ttl_seconds": 60},
         }
 
-        # Test ProducerConfig creation from dict
-        producer_config = ProducerConfig.from_dict(config_dict)
+        # Test SmartProducerConfig creation from dict
+        producer_config = SmartProducerConfig.from_dict(config_dict)
 
         # Verify smart configuration is properly stored
         assert producer_config.smart_enabled is False

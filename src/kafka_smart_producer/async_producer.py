@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from confluent_kafka import Producer as ConfluentProducer
 
-from .producer_config import ProducerConfig
+from .producer_config import SmartProducerConfig
 from .producer_utils import BasePartitionSelector
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ class AsyncSmartProducer:
 
     def __init__(
         self,
-        config: ProducerConfig,
+        config: SmartProducerConfig,
         health_manager: Optional["AsyncPartitionHealthMonitor"] = None,
         max_workers: Optional[int] = None,
     ) -> None:
@@ -43,8 +43,8 @@ class AsyncSmartProducer:
             health_manager: Optional explicit health manager (overrides config)
             max_workers: Maximum workers for the thread pool executor
         """
-        if not isinstance(config, ProducerConfig):
-            raise ValueError("config must be ProducerConfig instance")
+        if not isinstance(config, SmartProducerConfig):
+            raise ValueError("config must be SmartProducerConfig instance")
 
         self._config = config
 

@@ -14,7 +14,7 @@ from .health_config import HealthManagerConfig
 
 
 @dataclass
-class ProducerConfig:
+class SmartProducerConfig:
     """
     Unified configuration facade for SmartProducer and AsyncSmartProducer.
 
@@ -24,13 +24,13 @@ class ProducerConfig:
 
     Example:
         # Simple configuration
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={'bootstrap.servers': 'localhost:9092'},
             topics=['orders']
         )
 
         # With health manager and custom cache settings
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={'bootstrap.servers': 'localhost:9092'},
             topics=['orders'],
             health_manager={'consumer_group': 'my-group'},
@@ -41,6 +41,9 @@ class ProducerConfig:
     # Required configuration
     kafka_config: Dict[str, Any]
     topics: List[str]
+
+    # Optional simplified health monitoring configuration
+    consumer_group: Optional[str] = None
 
     # Optional component configurations (user-friendly dict format)
     health_manager: Optional[Dict[str, Any]] = None
@@ -69,9 +72,11 @@ class ProducerConfig:
         # Create cache config (always present)
         self._cache_config = self._create_cache_config()
 
-        # Create health config (only when health_manager is provided)
+        # Create health config (priority: explicit health_manager, then consumer_group)
         if self.health_manager:
             self._health_config = self._create_health_config()
+        elif self.consumer_group:
+            self._health_config = self._create_health_config_from_consumer_group()
 
     def _create_cache_config(self) -> CacheConfig:
         """Create CacheConfig from user cache dict or defaults."""
@@ -117,6 +122,22 @@ class ProducerConfig:
             cache_ttl_seconds=hm_dict.get("cache_ttl_seconds", 300),
             sync_options=hm_dict.get("sync_options"),
             async_options=hm_dict.get("async_options"),
+        )
+
+    def _create_health_config_from_consumer_group(self) -> HealthManagerConfig:
+        """Create HealthManagerConfig from top-level consumer_group with defaults."""
+        if not self.consumer_group:
+            raise ValueError("consumer_group is required to create health config")
+
+        return HealthManagerConfig(
+            consumer_group=self.consumer_group,
+            health_threshold=0.5,
+            refresh_interval=5.0,
+            max_lag_for_health=1000,
+            timeout_seconds=5.0,
+            cache_enabled=True,
+            cache_max_size=1000,
+            cache_ttl_seconds=300,
         )
 
     # Public API - clean access to internal configuration objects
@@ -172,9 +193,9 @@ class ProducerConfig:
         }
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> "ProducerConfig":
+    def from_dict(cls, config_dict: Dict[str, Any]) -> "SmartProducerConfig":
         """
-        Create ProducerConfig from a dictionary (backward compatibility).
+        Create SmartProducerConfig from a dictionary (backward compatibility).
 
         This enables the old usage pattern:
             config = {'bootstrap.servers': '...', 'topics': [...]}
@@ -184,7 +205,7 @@ class ProducerConfig:
             config_dict: Configuration dictionary
 
         Returns:
-            ProducerConfig instance
+            SmartProducerConfig instance
         """
         # Extract topics from dict or kafka_config
         topics = config_dict.get("topics")
@@ -195,6 +216,7 @@ class ProducerConfig:
         kafka_config = {}
         smart_keys = {
             "topics",
+            "consumer_group",
             "health_manager",
             "cache",
             "smart_enabled",
@@ -206,6 +228,7 @@ class ProducerConfig:
                 kafka_config[key] = value
 
         # Extract optional configurations
+        consumer_group = config_dict.get("consumer_group")
         health_manager = config_dict.get("health_manager")
         cache = config_dict.get("cache")
         smart_enabled = config_dict.get("smart_enabled", True)
@@ -214,6 +237,7 @@ class ProducerConfig:
         return cls(
             kafka_config=kafka_config,
             topics=topics,
+            consumer_group=consumer_group,
             health_manager=health_manager,
             cache=cache,
             smart_enabled=smart_enabled,
@@ -222,7 +246,7 @@ class ProducerConfig:
 
     def to_dict(self) -> Dict[str, Any]:
         """
-        Convert ProducerConfig back to dictionary format.
+        Convert SmartProducerConfig back to dictionary format.
 
         Useful for serialization or backward compatibility.
 
@@ -238,6 +262,9 @@ class ProducerConfig:
             }
         )
 
+        if self.consumer_group:
+            result["consumer_group"] = self.consumer_group
+
         if self.health_manager:
             result["health_manager"] = self.health_manager
 
@@ -249,7 +276,7 @@ class ProducerConfig:
     def __repr__(self) -> str:
         """String representation for debugging."""
         return (
-            f"ProducerConfig("
+            f"SmartProducerConfig("
             f"topics={self.topics}, "
             f"smart_enabled={self.smart_enabled}, "
             f"cache_config={self._cache_config}, "

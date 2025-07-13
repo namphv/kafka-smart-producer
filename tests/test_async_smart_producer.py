@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from kafka_smart_producer.async_producer import AsyncSmartProducer
-from kafka_smart_producer.producer_config import ProducerConfig
+from kafka_smart_producer.producer_config import SmartProducerConfig
 
 
 class MockHealthManager:
@@ -43,7 +43,7 @@ class MockHealthManager:
 @pytest.fixture
 def basic_config():
     """Basic Kafka configuration for testing."""
-    return ProducerConfig.from_dict(
+    return SmartProducerConfig.from_dict(
         {
             "bootstrap.servers": "localhost:9092",
             "client.id": "test-async-producer",

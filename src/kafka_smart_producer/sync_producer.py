@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from confluent_kafka import Producer as ConfluentProducer
 
-from .producer_config import ProducerConfig
+from .producer_config import SmartProducerConfig
 from .producer_utils import BasePartitionSelector
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ class SmartProducer:
 
     def __init__(
         self,
-        config: ProducerConfig,
+        config: SmartProducerConfig,
         health_manager: Optional["PartitionHealthMonitor"] = None,
     ) -> None:
         """
@@ -39,8 +39,8 @@ class SmartProducer:
             config: Producer configuration
             health_manager: Optional explicit health manager (overrides config)
         """
-        if not isinstance(config, ProducerConfig):
-            raise ValueError("config must be ProducerConfig instance")
+        if not isinstance(config, SmartProducerConfig):
+            raise ValueError("config must be SmartProducerConfig instance")
 
         self._config = config
 

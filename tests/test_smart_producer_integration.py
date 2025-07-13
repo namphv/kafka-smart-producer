@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from kafka_smart_producer.async_producer import AsyncSmartProducer
-from kafka_smart_producer.producer_config import ProducerConfig
+from kafka_smart_producer.producer_config import SmartProducerConfig
 from kafka_smart_producer.sync_producer import SmartProducer
 
 
@@ -21,7 +21,7 @@ class TestSmartProducerIntegration:
     @pytest.fixture
     def basic_config(self):
         """Basic producer configuration."""
-        return ProducerConfig.from_dict(
+        return SmartProducerConfig.from_dict(
             {
                 "bootstrap.servers": "localhost:9092",
                 "topics": ["test-topic"],
@@ -36,7 +36,7 @@ class TestSmartProducerIntegration:
     def test_sync_producer_initialization_with_config(
         self, mock_confluent_producer, basic_config
     ):
-        """Test sync producer initialization with ProducerConfig."""
+        """Test sync producer initialization with SmartProducerConfig."""
         mock_producer_instance = Mock()
         mock_confluent_producer.return_value = mock_producer_instance
 
@@ -63,7 +63,7 @@ class TestSmartProducerIntegration:
     def test_async_producer_initialization_with_config(
         self, mock_confluent_producer, basic_config
     ):
-        """Test async producer initialization with ProducerConfig."""
+        """Test async producer initialization with SmartProducerConfig."""
         mock_producer_instance = Mock()
         mock_confluent_producer.return_value = mock_producer_instance
 
@@ -197,7 +197,7 @@ class TestSmartProducerIntegration:
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
     def test_sync_producer_disabled_smart_partitioning(self, mock_confluent_producer):
         """Test sync producer with smart partitioning disabled."""
-        config = ProducerConfig.from_dict(
+        config = SmartProducerConfig.from_dict(
             {
                 "bootstrap.servers": "localhost:9092",
                 "topics": ["test-topic"],
@@ -285,7 +285,7 @@ class TestSmartProducerIntegration:
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
     def test_sync_producer_no_key_stickiness(self, mock_confluent_producer):
         """Test sync producer with key stickiness disabled."""
-        config = ProducerConfig.from_dict(
+        config = SmartProducerConfig.from_dict(
             {
                 "bootstrap.servers": "localhost:9092",
                 "topics": ["test-topic"],

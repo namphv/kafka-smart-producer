@@ -11,7 +11,7 @@ from unittest.mock import Mock, call, patch
 import pytest
 
 from kafka_smart_producer.async_producer import AsyncSmartProducer
-from kafka_smart_producer.producer_config import ProducerConfig
+from kafka_smart_producer.producer_config import SmartProducerConfig
 from kafka_smart_producer.sync_producer import SmartProducer
 
 
@@ -21,7 +21,7 @@ class TestSyncProducerMessageDelivery:
     @pytest.fixture
     def basic_config(self):
         """Basic configuration without health manager."""
-        return ProducerConfig.from_dict(
+        return SmartProducerConfig.from_dict(
             {
                 "bootstrap.servers": "localhost:9092",
                 "topics": ["test-topic"],
@@ -169,7 +169,7 @@ class TestAsyncProducerMessageDelivery:
     @pytest.fixture
     def basic_config(self):
         """Basic configuration without health manager."""
-        return ProducerConfig.from_dict(
+        return SmartProducerConfig.from_dict(
             {
                 "bootstrap.servers": "localhost:9092",
                 "topics": ["test-topic"],
@@ -412,7 +412,7 @@ class TestDeliveryBehaviorComparison:
 
     @pytest.fixture
     def config(self):
-        return ProducerConfig.from_dict(
+        return SmartProducerConfig.from_dict(
             {
                 "bootstrap.servers": "localhost:9092",
                 "topics": ["test-topic"],

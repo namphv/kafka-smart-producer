@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from kafka_smart_producer.producer_config import ProducerConfig
+from kafka_smart_producer.producer_config import SmartProducerConfig
 from kafka_smart_producer.producer_utils import (
     BasePartitionSelector,
     create_cache_from_config,
@@ -23,13 +23,13 @@ class TestCreateCacheFromConfig:
     @pytest.fixture
     def base_config(self):
         """Base config for testing."""
-        return ProducerConfig(
+        return SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"}, topics=["test-topic"]
         )
 
     def test_create_local_cache(self, base_config):
         """Test creation of local cache."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["test-topic"],
             cache={"local_max_size": 500, "local_ttl_seconds": 120.0},
@@ -51,7 +51,7 @@ class TestCreateCacheFromConfig:
 
     def test_create_hybrid_cache_success(self):
         """Test successful creation of hybrid cache when remote is enabled."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["test-topic"],
             cache={
@@ -72,7 +72,7 @@ class TestCreateCacheFromConfig:
 
     def test_create_hybrid_cache_failure(self):
         """Test hybrid cache creation failure."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["test-topic"],
             cache={"remote_enabled": True},
@@ -90,7 +90,7 @@ class TestCreateHealthManagerFromConfig:
 
     def test_create_sync_health_manager(self):
         """Test creation of sync health manager."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={
                 "bootstrap.servers": "kafka1:9092,kafka2:9092",
                 "security.protocol": "PLAINTEXT",
@@ -134,7 +134,7 @@ class TestCreateHealthManagerFromConfig:
 
     def test_create_async_health_manager(self):
         """Test creation of async health manager."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["events"],
             health_manager={"consumer_group": "event-processors"},
@@ -161,7 +161,7 @@ class TestCreateHealthManagerFromConfig:
 
     def test_no_health_config(self):
         """Test when no health manager config is provided."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"}, topics=["test-topic"]
         )
 
@@ -170,7 +170,7 @@ class TestCreateHealthManagerFromConfig:
 
     def test_health_manager_creation_failure(self):
         """Test health manager creation failure."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["test-topic"],
             health_manager={"consumer_group": "test-group"},
@@ -186,7 +186,7 @@ class TestCreateHealthManagerFromConfig:
 
     def test_health_config_dict_conversion(self):
         """Test conversion of dict health config to HealthManagerConfig."""
-        config = ProducerConfig(
+        config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["test-topic"],
             health_manager={
