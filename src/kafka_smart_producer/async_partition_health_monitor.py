@@ -87,6 +87,10 @@ class AsyncPartitionHealthMonitor:
         self._task: Optional[asyncio.Task[None]] = None
         self._running = False
 
+        # Task tracking system for proper cleanup
+        self._running_tasks: set[asyncio.Task[Any]] = set()
+        self._task_lock = asyncio.Lock()
+
         cache_type = type(cache).__name__ if cache else "in-memory"
         redis_status = "enabled" if redis_health_publisher else "disabled"
         logger.info(
@@ -183,10 +187,12 @@ class AsyncPartitionHealthMonitor:
         redis_publisher = None
         try:
             # Try to create Redis publisher with default config
+            import os
+
             redis_config = {
-                "redis_host": "localhost",
-                "redis_port": 6379,
-                "redis_db": 0,
+                "redis_host": os.getenv("REDIS_HOST", "localhost"),
+                "redis_port": int(os.getenv("REDIS_PORT", "6379")),
+                "redis_db": int(os.getenv("REDIS_DB", "0")),
             }
             redis_publisher = CacheFactory.create_remote_cache(redis_config)
             if redis_publisher:
@@ -310,6 +316,8 @@ class AsyncPartitionHealthMonitor:
             return
 
         self._running = False
+
+        # Cancel main task
         if self._task:
             self._task.cancel()
             try:
@@ -317,6 +325,25 @@ class AsyncPartitionHealthMonitor:
             except asyncio.CancelledError:
                 pass
             self._task = None
+
+        # Cancel all tracked tasks
+        async with self._task_lock:
+            if self._running_tasks:
+                logger.info(f"Cancelling {len(self._running_tasks)} tracked tasks")
+                for task in self._running_tasks:
+                    if not task.done():
+                        task.cancel()
+                        logger.debug(f"Cancelled task: {task}")
+
+                # Wait for all tasks to complete or cancel
+                if self._running_tasks:
+                    logger.debug("Waiting for all tasks to complete...")
+                    await asyncio.gather(*self._running_tasks, return_exceptions=True)
+                    logger.debug("All tasks completed")
+
+                self._running_tasks.clear()
+            else:
+                logger.debug("No tracked tasks to cancel")
 
         # Clean up health streams
         for queue in self._health_streams.values():
@@ -533,8 +560,22 @@ class AsyncPartitionHealthMonitor:
         """Concurrent monitoring of all topics - THIS IS THE ASYNC VALUE!"""
         logger.debug("Starting concurrent topic monitoring")
 
-        # Perform initial concurrent refresh
-        await self._refresh_all_topics_concurrent(topics)
+        # Perform initial concurrent refresh with timeout protection
+        try:
+            await asyncio.wait_for(
+                self._refresh_all_topics_concurrent(topics), timeout=30.0
+            )
+            logger.debug("Initial concurrent refresh completed successfully")
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Initial concurrent refresh timed out - "
+                "continuing with empty health data"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Initial concurrent refresh failed: {e} - "
+                "continuing with empty health data"
+            )
 
         while self._running:
             try:
@@ -558,8 +599,19 @@ class AsyncPartitionHealthMonitor:
         """Legacy refresh loop for backward compatibility."""
         logger.debug("Starting async health refresh loop (legacy mode)")
 
-        # Perform initial refresh
-        await self._refresh_all_topics()
+        # Perform initial refresh with timeout protection
+        try:
+            await asyncio.wait_for(self._refresh_all_topics(), timeout=30.0)
+            logger.debug("Initial health refresh completed successfully")
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Initial health refresh timed out - continuing with empty health data"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Initial health refresh failed: {e} - "
+                "continuing with empty health data"
+            )
 
         while self._running:
             try:
@@ -585,17 +637,33 @@ class AsyncPartitionHealthMonitor:
         logger.debug(f"Starting concurrent refresh of {len(topics)} topics")
 
         # Create concurrent refresh tasks for all topics
-        refresh_tasks = [self._refresh_single_topic(topic) for topic in topics]
+        refresh_tasks = [
+            asyncio.create_task(self._refresh_single_topic(topic)) for topic in topics
+        ]
 
-        # Execute all refreshes concurrently - this is the performance win!
-        results = await asyncio.gather(*refresh_tasks, return_exceptions=True)
+        # Track all tasks for proper cleanup
+        async with self._task_lock:
+            self._running_tasks.update(refresh_tasks)
+            logger.debug(
+                f"Tracking {len(refresh_tasks)} refresh tasks, "
+                f"total tracked: {len(self._running_tasks)}"
+            )
 
-        # Log any failures
-        for topic, result in zip(topics, results):
-            if isinstance(result, Exception):
-                logger.warning(
-                    f"Concurrent refresh failed for topic '{topic}': {result}"
-                )
+        try:
+            # Execute all refreshes concurrently - this is the performance win!
+            results = await asyncio.gather(*refresh_tasks, return_exceptions=True)
+
+            # Log any failures
+            for topic, result in zip(topics, results):
+                if isinstance(result, Exception):
+                    logger.warning(
+                        f"Concurrent refresh failed for topic '{topic}': {result}"
+                    )
+        finally:
+            # Clean up task tracking
+            async with self._task_lock:
+                for task in refresh_tasks:
+                    self._running_tasks.discard(task)
 
         logger.debug(f"Completed concurrent refresh of {len(topics)} topics")
 
@@ -613,6 +681,8 @@ class AsyncPartitionHealthMonitor:
     async def _refresh_single_topic(self, topic: str) -> dict[int, float]:
         """Refresh health data for a single topic."""
         try:
+            # Note: force_refresh works even when not running (it's a force operation)
+
             # Support both sync and async lag collectors - THIS IS PHASE 5!
             if hasattr(self._lag_collector, "get_lag_data_async"):
                 # Use async collector if available - native async support
@@ -627,13 +697,27 @@ class AsyncPartitionHealthMonitor:
                     f"Using sync lag collector in executor for topic '{topic}'"
                 )
                 loop = asyncio.get_event_loop()
-                health_data = await loop.run_in_executor(
-                    None,
-                    collect_and_calculate_health,
-                    self._lag_collector,
-                    topic,
-                    self._max_lag_for_health,
-                )
+
+                # Use asyncio.wait_for to ensure cancellation works
+                try:
+                    health_data = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            collect_and_calculate_health,
+                            self._lag_collector,
+                            topic,
+                            self._max_lag_for_health,
+                        ),
+                        timeout=30.0,  # 30 second timeout to prevent hanging
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"Timeout refreshing topic '{topic}' - using empty health data"
+                    )
+                    return {}
+                except asyncio.CancelledError:
+                    logger.debug(f"Refresh cancelled for topic '{topic}'")
+                    raise
 
             # Update health data with dual locking
             with self._thread_lock:

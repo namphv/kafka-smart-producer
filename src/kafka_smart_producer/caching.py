@@ -70,6 +70,16 @@ class RemoteCache(Protocol):
         """Check if remote cache is available."""
         ...
 
+    def publish_health_data(
+        self, topic: str, health_data: dict[int, float], health_threshold: float = 0.5
+    ) -> None:
+        """Publish health data to distributed cache."""
+        ...
+
+    def get_health_data(self, topic: str) -> Optional[dict[int, float]]:
+        """Retrieve health data from distributed cache."""
+        ...
+
 
 class HybridCache(Protocol):
     """Combined local + remote cache with read-through pattern."""
@@ -87,6 +97,31 @@ class HybridCache(Protocol):
 
     def delete(self, key: str) -> None:
         """Delete key from both local and remote caches."""
+        ...
+
+    def publish_health_data(
+        self, topic: str, health_data: dict[int, float], health_threshold: float = 0.5
+    ) -> None:
+        """
+        Publish health data to distributed cache for sharing across producer instances.
+
+        Args:
+            topic: Kafka topic name
+            health_data: Dict mapping partition_id -> health_score (0.0-1.0)
+            health_threshold: Minimum score to consider partition healthy
+        """
+        ...
+
+    def get_health_data(self, topic: str) -> Optional[dict[int, float]]:
+        """
+        Retrieve health data from distributed cache.
+
+        Args:
+            topic: Kafka topic name
+
+        Returns:
+            Dict mapping partition_id -> health_score or None if not found
+        """
         ...
 
 
@@ -243,6 +278,27 @@ class DefaultHybridCache:
             logger.warning(f"Remote cache delete failed for key {key}: {e}")
             # Let the exception bubble up - fail fast
 
+    def publish_health_data(
+        self, topic: str, health_data: dict[int, float], health_threshold: float = 0.5
+    ) -> None:
+        """Publish health data using the remote cache (no local caching)."""
+        # Health data is only published to remote cache for distributed sharing
+        # Local cache is not used for health data to avoid stale health information
+        if hasattr(self._remote, "publish_health_data"):
+            self._remote.publish_health_data(topic, health_data, health_threshold)
+        else:
+            logger.warning("Remote cache does not support health data publishing")
+
+    def get_health_data(self, topic: str) -> Optional[dict[int, float]]:
+        """Retrieve health data from remote cache only (no local caching)."""
+        # Health data is only retrieved from remote cache to ensure freshness
+        # Local cache is not used for health data to avoid stale health information
+        if hasattr(self._remote, "get_health_data"):
+            return self._remote.get_health_data(topic)
+        else:
+            logger.warning("Remote cache does not support health data retrieval")
+            return None
+
 
 class DefaultRemoteCache:
     """Redis-based remote cache implementation with sync Redis client."""
@@ -328,6 +384,82 @@ class DefaultRemoteCache:
             return True
         except Exception:
             return False
+
+    def publish_health_data(
+        self, topic: str, health_data: dict[int, float], health_threshold: float = 0.5
+    ) -> None:
+        """Publish health data to Redis with structured keys for easy retrieval."""
+        if not self._redis:
+            return
+
+        try:
+            import json
+            import time
+
+            current_time = time.time()
+
+            # Store complete health data with metadata
+            health_payload = {
+                "topic": topic,
+                "partitions": health_data,
+                "timestamp": current_time,
+                "healthy_count": sum(
+                    1 for score in health_data.values() if score >= health_threshold
+                ),
+                "total_count": len(health_data),
+                "health_threshold": health_threshold,
+            }
+
+            # Store complete health state
+            state_key = f"kafka_health:state:{topic}"
+            self._redis.setex(state_key, 300, json.dumps(health_payload))  # 5 min TTL
+
+            # Store healthy partitions list for quick access
+            healthy_partitions = [
+                partition_id
+                for partition_id, score in health_data.items()
+                if score >= health_threshold
+            ]
+            healthy_key = f"kafka_health:healthy:{topic}"
+            self._redis.setex(
+                healthy_key, 300, json.dumps(healthy_partitions)
+            )  # 5 min TTL
+
+            logger.debug(
+                f"Published health data for {topic}: "
+                f"{len(healthy_partitions)}/{len(health_data)} healthy partitions"
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to publish health data for {topic}: {e}")
+
+    def get_health_data(self, topic: str) -> Optional[dict[int, float]]:
+        """Retrieve health data from Redis."""
+        if not self._redis:
+            return None
+
+        try:
+            import json
+
+            # Get complete health state
+            state_key = f"kafka_health:state:{topic}"
+            state_data = self._redis.get(state_key)
+
+            if state_data:
+                health_payload = json.loads(state_data.decode("utf-8"))
+                partitions_data = health_payload.get("partitions", {})
+
+                # Convert string keys back to integers
+                return {
+                    int(partition_id): score
+                    for partition_id, score in partitions_data.items()
+                }
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Failed to get health data for {topic}: {e}")
+            return None
 
 
 class CacheUnavailableError(CacheError):

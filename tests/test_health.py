@@ -60,9 +60,9 @@ class TestHealthManagerConfig:
 
         assert config.consumer_group == "test-group"
         assert config.health_threshold == 0.5
-        assert config.refresh_interval == 5.0
+        assert config.refresh_interval == 30.0  # Updated production-ready default
         assert config.max_lag_for_health == 1000
-        assert config.timeout_seconds == 5.0
+        assert config.timeout_seconds == 20.0  # Updated production-ready default
         assert config.cache_enabled is True
 
     def test_custom_config(self):
@@ -70,14 +70,16 @@ class TestHealthManagerConfig:
         config = HealthManagerConfig(
             consumer_group="test-group",
             health_threshold=0.7,
-            refresh_interval=10.0,
+            refresh_interval=20.0,  # Must be >= 15s for validation
             max_lag_for_health=2000,
+            timeout_seconds=15.0,  # Must be less than refresh_interval
         )
 
         assert config.consumer_group == "test-group"
         assert config.health_threshold == 0.7
-        assert config.refresh_interval == 10.0
+        assert config.refresh_interval == 20.0
         assert config.max_lag_for_health == 2000
+        assert config.timeout_seconds == 15.0
 
     def test_validation(self):
         """Test configuration validation."""
@@ -129,7 +131,7 @@ class TestPartitionHealthMonitor:
         """Create a sync health manager with mock dependencies."""
         lag_collector = MockLagDataCollector(lag_data)
         config = config or HealthManagerConfig(
-            consumer_group="test-group", refresh_interval=0.1
+            consumer_group="test-group", refresh_interval=2.0, timeout_seconds=1.0
         )
 
         return PartitionHealthMonitor(
@@ -146,7 +148,7 @@ class TestPartitionHealthMonitor:
 
         assert manager._lag_collector is not None
         assert manager._health_threshold == 0.5
-        assert manager._refresh_interval == 0.1
+        assert manager._refresh_interval == 2.0
         assert not manager._running
 
     def test_sync_lifecycle(self):
@@ -172,7 +174,12 @@ class TestPartitionHealthMonitor:
     def test_sync_get_healthy_partitions(self):
         """Test getting healthy partitions from sync manager."""
         lag_data = {"test-topic": {0: 100, 1: 500, 2: 50}}
-        config = HealthManagerConfig(consumer_group="test-group", health_threshold=0.4)
+        config = HealthManagerConfig(
+            consumer_group="test-group",
+            health_threshold=0.4,
+            refresh_interval=5.0,
+            timeout_seconds=3.0,
+        )
         manager = self.create_sync_health_manager(lag_data, config)
 
         # Initialize topics monitoring
@@ -191,7 +198,12 @@ class TestPartitionHealthMonitor:
     def test_sync_is_partition_healthy(self):
         """Test partition health checking in sync manager."""
         lag_data = {"test-topic": {0: 100, 1: 500, 2: 50}}
-        config = HealthManagerConfig(consumer_group="test-group", health_threshold=0.4)
+        config = HealthManagerConfig(
+            consumer_group="test-group",
+            health_threshold=0.4,
+            refresh_interval=5.0,
+            timeout_seconds=3.0,
+        )
         manager = self.create_sync_health_manager(lag_data, config)
 
         # Add topic and force refresh
@@ -239,7 +251,8 @@ class TestPartitionHealthMonitor:
         config = HealthManagerConfig(
             consumer_group="test-group",
             health_threshold=0.7,
-            refresh_interval=3.0,
+            refresh_interval=5.0,
+            timeout_seconds=3.0,
         )
 
         kafka_config = {"bootstrap.servers": "localhost:9092"}
@@ -265,7 +278,7 @@ class TestAsyncPartitionHealthMonitor:
         """Create an async health manager with mock dependencies."""
         lag_collector = MockLagDataCollector(lag_data)
         config = config or HealthManagerConfig(
-            consumer_group="test-group", refresh_interval=0.1
+            consumer_group="test-group", refresh_interval=2.0, timeout_seconds=1.0
         )
 
         return AsyncPartitionHealthMonitor(
@@ -282,7 +295,7 @@ class TestAsyncPartitionHealthMonitor:
 
         assert manager._lag_collector is not None
         assert manager._health_threshold == 0.5
-        assert manager._refresh_interval == 0.1
+        assert manager._refresh_interval == 2.0
         assert not manager._running
 
     @pytest.mark.asyncio
@@ -310,7 +323,12 @@ class TestAsyncPartitionHealthMonitor:
     async def test_async_get_healthy_partitions(self):
         """Test getting healthy partitions from async manager."""
         lag_data = {"test-topic": {0: 100, 1: 500, 2: 50}}
-        config = HealthManagerConfig(consumer_group="test-group", health_threshold=0.4)
+        config = HealthManagerConfig(
+            consumer_group="test-group",
+            health_threshold=0.4,
+            refresh_interval=5.0,
+            timeout_seconds=3.0,
+        )
         manager = self.create_async_health_manager(lag_data, config)
 
         # Add topic to monitoring
@@ -330,7 +348,12 @@ class TestAsyncPartitionHealthMonitor:
     async def test_async_is_partition_healthy(self):
         """Test partition health checking in async manager."""
         lag_data = {"test-topic": {0: 100, 1: 500, 2: 50}}
-        config = HealthManagerConfig(consumer_group="test-group", health_threshold=0.4)
+        config = HealthManagerConfig(
+            consumer_group="test-group",
+            health_threshold=0.4,
+            refresh_interval=5.0,
+            timeout_seconds=3.0,
+        )
         manager = self.create_async_health_manager(lag_data, config)
 
         # Add topic and force refresh
@@ -392,7 +415,8 @@ class TestAsyncPartitionHealthMonitor:
         config = HealthManagerConfig(
             consumer_group="test-group",
             health_threshold=0.7,
-            refresh_interval=3.0,
+            refresh_interval=5.0,
+            timeout_seconds=3.0,
         )
 
         kafka_config = {"bootstrap.servers": "localhost:9092"}
@@ -413,7 +437,12 @@ class TestHealthManagerComparison:
     def test_consistent_behavior(self):
         """Test that sync and async managers produce consistent results."""
         lag_data = {"test-topic": {0: 100, 1: 500, 2: 50}}
-        config = HealthManagerConfig(consumer_group="test-group", health_threshold=0.4)
+        config = HealthManagerConfig(
+            consumer_group="test-group",
+            health_threshold=0.4,
+            refresh_interval=5.0,
+            timeout_seconds=3.0,
+        )
 
         # Create both managers
         sync_manager = self.create_sync_manager(lag_data, config)

@@ -1,6 +1,7 @@
 # Kafka Smart Producer
 
 [![CI](https://github.com/namphv/kafka-smart-producer/workflows/CI/badge.svg)](https://github.com/namphv/kafka-smart-producer/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/namphv/kafka-smart-producer/branch/main/graph/badge.svg)](https://codecov.io/gh/namphv/kafka-smart-producer)
 [![PyPI version](https://badge.fury.io/py/kafka-smart-producer.svg)](https://badge.fury.io/py/kafka-smart-producer)
 [![Python Version](https://img.shields.io/pypi/pyversions/kafka-smart-producer.svg)](https://pypi.org/project/kafka-smart-producer/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -121,13 +122,14 @@ async def main():
    - `KafkaAdminLagCollector`: Uses Kafka AdminClient (default)
    - Extensible for custom data sources (Redis, Prometheus, etc.)
 
-2. **HotPartitionCalculator Protocol**: Transforms lag data into health scores
-   - `ThresholdHotPartitionCalculator`: Basic threshold-based scoring (default)
-   - Extensible for custom health algorithms
+2. **Health Calculation**: Transforms lag data into health scores using linear scaling
+   - Built-in linear health scoring algorithm (0.0-1.0 based on lag thresholds)
+   - Configurable via `HealthManagerConfig` (health_threshold, max_lag_for_health)
 
 3. **HealthManager**: Central coordinator for health monitoring
    - `PartitionHealthMonitor`: Sync implementation with threading
    - `AsyncPartitionHealthMonitor`: Async implementation with asyncio
+   - Configured via `HealthManagerConfig` with unified sync/async settings
 
 ### Caching Strategy
 
@@ -150,6 +152,142 @@ async def main():
 - **Memory**: Efficient caching with configurable TTL and size limits
 - **Network**: Optional Redis caching for distributed deployments
 
+## 📋 Usage Scenarios
+
+The library provides complete flexibility with **2 producer types** × **2 health monitor types** × **3 cache types** = **12 distinct usage scenarios** to fit different architectural needs.
+
+### Producer Types
+
+#### 1. **SmartProducer (Sync)**
+
+- **Usage**: Drop-in replacement for `confluent_kafka.Producer`
+- **Health Monitor**: Uses `PartitionHealthMonitor` (threading-based)
+- **Context**: Synchronous applications, traditional blocking I/O
+
+#### 2. **AsyncSmartProducer (Async)**
+
+- **Usage**: Async/await API with `asyncio` integration
+- **Health Monitor**: Uses `AsyncPartitionHealthMonitor` (asyncio-based)
+- **Context**: Asynchronous applications, high-concurrency workloads
+
+### Health Monitor Types
+
+#### 1. **PartitionHealthMonitor (Sync)**
+
+- **Threading**: Uses daemon threads for background monitoring
+- **API**: Thread-safe methods with locks
+- **Modes**:
+  - `HealthMode.EMBEDDED` - Lightweight for producer integration
+  - `HealthMode.STANDALONE` - Full-featured monitoring service with Redis publishing
+
+#### 2. **AsyncPartitionHealthMonitor (Async)**
+
+- **Concurrency**: Uses `asyncio.Task` for background monitoring
+- **API**: Async methods with dual locking (thread-safe + async-safe)
+- **Features**:
+  - Concurrent topic monitoring
+  - Health streams for reactive patterns
+  - Same modes as sync version
+
+### Cache Types
+
+#### 1. **DefaultLocalCache (In-Memory)**
+
+- **Implementation**: LRU cache using `cachetools.LRUCache`
+- **Features**: O(1) operations, TTL support, thread-safe
+- **Usage**: Fast local caching, no external dependencies
+
+#### 2. **DefaultRemoteCache (Redis)**
+
+- **Implementation**: Redis-based distributed cache
+- **Features**: Persistence, sharing across producers, SSL support
+- **Usage**: Multi-producer environments, distributed systems
+
+#### 3. **DefaultHybridCache (Local + Remote)**
+
+- **Implementation**: L1 (local) + L2 (Redis) cache
+- **Features**: Read-through pattern, local promotion, fail-fast
+- **Usage**: Best performance with distributed consistency
+
+### Configuration Matrix
+
+| Producer Type      | Health Monitor              | Cache Type | Use Case                  |
+| ------------------ | --------------------------- | ---------- | ------------------------- |
+| SmartProducer      | PartitionHealthMonitor      | Local      | Simple sync apps          |
+| SmartProducer      | PartitionHealthMonitor      | Redis      | Distributed sync systems  |
+| SmartProducer      | PartitionHealthMonitor      | Hybrid     | High-performance sync     |
+| AsyncSmartProducer | AsyncPartitionHealthMonitor | Local      | Simple async apps         |
+| AsyncSmartProducer | AsyncPartitionHealthMonitor | Redis      | Distributed async systems |
+| AsyncSmartProducer | AsyncPartitionHealthMonitor | Hybrid     | High-performance async    |
+
+### Complete Usage Examples
+
+#### Scenario 1: Simple Sync Producer with Local Cache
+
+```python
+config = SmartProducerConfig(
+    kafka_config={"bootstrap.servers": "localhost:9092"},
+    topics=["orders"],
+    consumer_group="order-processors"
+)
+producer = SmartProducer(config)
+```
+
+#### Scenario 2: Async Producer with Concurrent Health Monitoring
+
+```python
+config = SmartProducerConfig(
+    kafka_config={"bootstrap.servers": "localhost:9092"},
+    topics=["orders", "payments", "inventory"],
+    consumer_group="processors"
+)
+producer = AsyncSmartProducer(config)
+```
+
+#### Scenario 3: Sync Producer with Redis Cache
+
+```python
+config = SmartProducerConfig(
+    kafka_config={"bootstrap.servers": "localhost:9092"},
+    topics=["orders"],
+    consumer_group="processors",
+    cache_config=CacheConfig(
+        remote_enabled=True,
+        redis_host="redis.example.com"
+    )
+)
+producer = SmartProducer(config)
+```
+
+#### Scenario 4: Async Producer with Health Streams
+
+```python
+producer = AsyncSmartProducer(config)
+async for health_update in producer.health_manager.health_stream("orders"):
+    unhealthy = [p for p, score in health_update.items() if score < 0.3]
+    if unhealthy:
+        await alert.send(f"Partitions {unhealthy} unhealthy!")
+```
+
+#### Scenario 5: Standalone Health Monitor Service
+
+```python
+health_monitor = PartitionHealthMonitor.standalone(
+    consumer_group="my-consumers",
+    kafka_config={"bootstrap.servers": "localhost:9092"},
+    topics=["orders", "payments"]
+)
+# Runs as independent monitoring service with Redis publishing
+```
+
+#### Scenario 6: Custom Health Monitor Integration
+
+```python
+lag_collector = KafkaAdminLagCollector(...)
+health_monitor = PartitionHealthMonitor.embedded(lag_collector, ["orders"])
+producer = SmartProducer(config, health_manager=health_monitor)
+```
+
 ## 🔧 Configuration Options
 
 ### SmartProducerConfig
@@ -170,9 +308,26 @@ async def main():
 | -------------------- | ----- | -------- | ------------------------------------------- |
 | `consumer_group`     | str   | Required | Consumer group to monitor                   |
 | `health_threshold`   | float | 0.5      | Minimum health score for healthy partitions |
-| `refresh_interval`   | float | 5.0      | Seconds between health data refreshes       |
+| `refresh_interval`   | float | 30.0     | Seconds between health data refreshes       |
 | `max_lag_for_health` | int   | 1000     | Maximum lag for 0.0 health score            |
-| `timeout_seconds`    | float | 5.0      | Timeout for lag collection operations       |
+| `timeout_seconds`    | float | 20.0     | Timeout for lag collection operations       |
+| `cache_enabled`      | bool  | True     | Enable caching of health data               |
+| `cache_max_size`     | int   | 1000     | Maximum cache entries                       |
+| `cache_ttl_seconds`  | int   | 300      | Cache TTL in seconds                        |
+
+### Cache Configuration
+
+| Parameter            | Type  | Default   | Description                    |
+| -------------------- | ----- | --------- | ------------------------------ |
+| `local_max_size`     | int   | 1000      | LRU cache maximum entries      |
+| `local_ttl_seconds`  | float | 300.0     | Local cache TTL                |
+| `remote_enabled`     | bool  | False     | Enable Redis distributed cache |
+| `remote_ttl_seconds` | float | 900.0     | Redis cache TTL                |
+| `redis_host`         | str   | localhost | Redis server hostname          |
+| `redis_port`         | int   | 6379      | Redis server port              |
+| `redis_db`           | int   | 0         | Redis database number          |
+| `redis_password`     | str   | None      | Redis password (optional)      |
+| `redis_ssl_enabled`  | bool  | False     | Enable Redis SSL/TLS           |
 
 ## 🧪 Testing
 
@@ -192,6 +347,28 @@ mypy src/
 # Linting
 ruff check .
 ```
+
+## 📊 Code Coverage
+
+The project maintains **70.5%** test coverage with comprehensive unit tests. Coverage reports are generated automatically in CI/CD and uploaded to Codecov.
+
+### Running Coverage Locally
+
+```bash
+# Run tests with coverage report
+uv run pytest tests/ --ignore=tests/integration/ --cov=src --cov-report=html --cov-report=term
+
+# View detailed HTML coverage report
+open coverage_html/index.html
+```
+
+### Coverage Breakdown
+
+- **High Coverage (>85%)**: Core producer classes, configuration, and protocols
+- **Medium Coverage (70-85%)**: Health monitoring and partition selection logic
+- **Areas for Improvement (<70%)**: Redis caching, advanced streaming, and error handling paths
+
+The coverage threshold is set to 70% to ensure code quality while allowing for reasonable development velocity. Integration tests are excluded from coverage as they test end-to-end scenarios with external dependencies.
 
 ## 🤝 Contributing
 

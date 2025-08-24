@@ -39,9 +39,9 @@ class HealthManagerConfig:
 
     # Common optional configuration (with sensible defaults)
     health_threshold: float = 0.5
-    refresh_interval: float = 5.0
+    refresh_interval: float = 30.0  # Increased from 5.0 for real-world reliability
     max_lag_for_health: int = 1000
-    timeout_seconds: float = 5.0
+    timeout_seconds: float = 20.0  # Increased from 5.0 for AdminClient operations
     cache_enabled: bool = True
     cache_max_size: int = 1000
     cache_ttl_seconds: int = 300
@@ -60,6 +60,20 @@ class HealthManagerConfig:
             raise ValueError("max_lag_for_health must be positive")
         if self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+
+        # Validate refresh_interval is reasonable (allow smaller values for testing)
+        if self.refresh_interval < 1.0:
+            raise ValueError(
+                f"refresh_interval ({self.refresh_interval}s) must be at least 1 second"
+            )
+
+        # Validate timeout vs refresh interval relationship
+        if self.timeout_seconds >= self.refresh_interval:
+            raise ValueError(
+                f"timeout_seconds ({self.timeout_seconds}s) should be less than "
+                f"refresh_interval ({self.refresh_interval}s) "
+                "to prevent overlapping operations"
+            )
 
     def get_sync_option(self, key: str, default: Any = None) -> Any:
         """

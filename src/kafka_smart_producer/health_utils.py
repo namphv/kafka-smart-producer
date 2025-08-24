@@ -152,7 +152,7 @@ def create_cache_from_config(
     health_config: "HealthManagerConfig",
 ) -> Optional[CacheBackend]:
     """
-    Create cache backend from configuration.
+    Create cache backend from HealthManagerConfig.
 
     Args:
         health_config: HealthManagerConfig instance

@@ -212,7 +212,7 @@ class TestSmartProducerConfig:
 
         health_config = config.health_config
         assert health_config.consumer_group == "test-group"
-        assert health_config.refresh_interval == 5.0  # Default
+        assert health_config.refresh_interval == 30.0  # Default
         assert health_config.max_lag_for_health == 1000  # Default
 
     def test_cache_config_creation_with_defaults(self):

@@ -8,6 +8,8 @@ test.db
 .mypy_cache/
 __pycache__/
 htmlcov/
+coverage_html/
+coverage.xml
 site/
 *.egg-info/
 venv*/
@@ -17,3 +19,4 @@ dist/
 .venv/
 .ruff_cache/
 node_modules/
+.debug/

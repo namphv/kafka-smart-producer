@@ -114,9 +114,9 @@ class SmartProducerConfig:
         return HealthManagerConfig(
             consumer_group=hm_dict["consumer_group"],
             health_threshold=hm_dict.get("health_threshold", 0.5),
-            refresh_interval=hm_dict.get("refresh_interval", 5.0),
+            refresh_interval=hm_dict.get("refresh_interval", 30.0),
             max_lag_for_health=hm_dict.get("max_lag_for_health", 1000),
-            timeout_seconds=hm_dict.get("timeout_seconds", 5.0),
+            timeout_seconds=hm_dict.get("timeout_seconds", 20.0),
             cache_enabled=hm_dict.get("cache_enabled", True),
             cache_max_size=hm_dict.get("cache_max_size", 1000),
             cache_ttl_seconds=hm_dict.get("cache_ttl_seconds", 300),
@@ -132,9 +132,9 @@ class SmartProducerConfig:
         return HealthManagerConfig(
             consumer_group=self.consumer_group,
             health_threshold=0.5,
-            refresh_interval=5.0,
+            refresh_interval=30.0,
             max_lag_for_health=1000,
-            timeout_seconds=5.0,
+            timeout_seconds=20.0,
             cache_enabled=True,
             cache_max_size=1000,
             cache_ttl_seconds=300,

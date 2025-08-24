@@ -131,30 +131,63 @@ def create_health_manager_from_config(
         lag_collector = KafkaAdminLagCollector(
             bootstrap_servers=kafka_config.get("bootstrap.servers", "localhost:9092"),
             consumer_group=health_manager_config.consumer_group,
+            timeout_seconds=health_manager_config.timeout_seconds,
             **{k: v for k, v in kafka_config.items() if k != "bootstrap.servers"},
         )
 
         # Create appropriate health manager
         if manager_type == "sync":
+            from .health_mode import HealthMode
             from .partition_health_monitor import PartitionHealthMonitor
 
-            health_manager = PartitionHealthMonitor.embedded(
-                lag_collector, topics=config.topics
+            # Create health manager with actual config values
+            # no Redis for embedded mode
+            health_manager = PartitionHealthMonitor(
+                lag_collector=lag_collector,
+                cache=None,  # No cache for embedded mode
+                health_threshold=health_manager_config.health_threshold,
+                refresh_interval=health_manager_config.refresh_interval,
+                max_lag_for_health=health_manager_config.max_lag_for_health,
+                mode=HealthMode.EMBEDDED,
+                redis_health_publisher=None,  # No Redis for embedded mode
             )
+
+            # Initialize with topics if provided
+            if config.topics:
+                health_manager._initialize_topics(config.topics)
+
             logger.info(
                 f"Created PartitionHealthMonitor for embedded mode with "
-                f"topics: {config.topics}"
+                f"topics: {config.topics}, "
+                f"health_threshold: {health_manager_config.health_threshold}, "
+                f"max_lag_for_health: {health_manager_config.max_lag_for_health}"
             )
             return health_manager
         else:
             from .async_partition_health_monitor import AsyncPartitionHealthMonitor
+            from .health_mode import HealthMode
 
-            health_manager = AsyncPartitionHealthMonitor.embedded(
-                lag_collector, topics=config.topics
+            # Create async health manager with actual config values
+            # no Redis for embedded mode
+            health_manager = AsyncPartitionHealthMonitor(
+                lag_collector=lag_collector,
+                cache=None,  # No cache for embedded mode
+                health_threshold=health_manager_config.health_threshold,
+                refresh_interval=health_manager_config.refresh_interval,
+                max_lag_for_health=health_manager_config.max_lag_for_health,
+                mode=HealthMode.EMBEDDED,
+                redis_health_publisher=None,  # No Redis for embedded mode
             )
+
+            # Initialize with topics if provided
+            if config.topics:
+                health_manager._initialize_topics(config.topics)
+
             logger.info(
                 f"Created AsyncPartitionHealthMonitor for embedded mode with "
-                f"topics: {config.topics}"
+                f"topics: {config.topics}, "
+                f"health_threshold: {health_manager_config.health_threshold}, "
+                f"max_lag_for_health: {health_manager_config.max_lag_for_health}"
             )
             return health_manager
 

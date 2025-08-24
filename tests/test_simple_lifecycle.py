@@ -24,7 +24,8 @@ class TestSimpleHealthManagerLifecycle:
                 "health_manager": {
                     "consumer_group": "test-group",
                     "health_threshold": 0.5,
-                    "refresh_interval": 5.0,
+                    "refresh_interval": 10.0,
+                    "timeout_seconds": 5.0,
                 },
             }
         )

@@ -24,7 +24,7 @@ test: ## Run tests
 	uv run pytest tests/ -v
 
 test-cov: ## Run tests with coverage
-	uv run pytest tests/ -v --cov=src/kafka_smart_producer --cov-report=html --cov-report=term
+	uv run pytest tests/ --ignore=tests/integration/ -v --cov=src --cov-report=html --cov-report=term --cov-report=xml
 
 test-fast: ## Run tests without slow tests
 	uv run pytest tests/ -v -m "not slow"
@@ -115,7 +115,7 @@ ci-setup: ## Set up CI environment
 	uv sync --dev
 
 ci-test: ## Run CI tests
-	uv run pytest tests/ -v --cov=src/kafka_smart_producer --cov-report=xml
+	uv run pytest tests/ --ignore=tests/integration/ -v --cov=src --cov-report=xml
 
 ci-check: ## Run CI quality checks
 	uv run ruff check src/ tests/

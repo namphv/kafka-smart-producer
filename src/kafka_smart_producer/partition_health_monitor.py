@@ -173,10 +173,12 @@ class PartitionHealthMonitor:
         redis_publisher = None
         try:
             # Try to create Redis publisher with default config
+            import os
+
             redis_config = {
-                "redis_host": "localhost",
-                "redis_port": 6379,
-                "redis_db": 0,
+                "redis_host": os.getenv("REDIS_HOST", "localhost"),
+                "redis_port": int(os.getenv("REDIS_PORT", "6379")),
+                "redis_db": int(os.getenv("REDIS_DB", "0")),
             }
             redis_publisher = CacheFactory.create_remote_cache(redis_config)
             if redis_publisher:

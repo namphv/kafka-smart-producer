@@ -93,12 +93,9 @@ class SmartProducer:
         if not self._config.health_config:
             return None
 
-        from .partition_health_monitor import PartitionHealthMonitor
+        from .producer_utils import create_health_manager_from_config
 
-        return PartitionHealthMonitor.from_config(
-            health_config=self._config.health_config,
-            kafka_config=self._config.get_clean_kafka_config(),
-        )
+        return create_health_manager_from_config(self._config, "sync")
 
     def _create_cache(self):
         """Create cache from config."""

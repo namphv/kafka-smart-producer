@@ -84,6 +84,7 @@ class AsyncSmartProducer:
             max_workers=max_workers, thread_name_prefix="async-smart-producer"
         )
         self._closed = False
+        self._health_manager_started = False
 
         health_status = "enabled" if self._health_manager else "disabled"
         logger.info(
@@ -98,18 +99,30 @@ class AsyncSmartProducer:
         if not self._config.health_config:
             return None
 
-        from .async_partition_health_monitor import AsyncPartitionHealthMonitor
+        from .producer_utils import create_health_manager_from_config
 
-        return AsyncPartitionHealthMonitor(
-            config=self._config.health_config,
-            kafka_config=self._config.get_clean_kafka_config(),
-        )
+        return create_health_manager_from_config(self._config, "async")
 
     def _create_cache(self):
         """Create cache from config."""
         from .producer_utils import create_cache_from_config
 
         return create_cache_from_config(self._config)
+
+    async def _ensure_health_manager_started(self) -> None:
+        """Ensure health manager is started (lazy initialization)."""
+        if (
+            self._health_manager is not None
+            and not self._health_manager_started
+            and not self._closed
+        ):
+            # Use start_monitoring() for concurrent topic refresh instead of start()
+            # This ensures all configured topics are refreshed concurrently
+            if self._config.topics:
+                await self._health_manager.start_monitoring(self._config.topics)
+            else:
+                await self._health_manager.start()
+            self._health_manager_started = True
 
     async def produce(
         self,
@@ -142,6 +155,9 @@ class AsyncSmartProducer:
         """
         if self._closed:
             raise RuntimeError("AsyncSmartProducer is closed")
+
+        # Ensure health manager is started
+        await self._ensure_health_manager_started()
 
         loop = asyncio.get_event_loop()
 
@@ -206,11 +222,32 @@ class AsyncSmartProducer:
                 self._executor, lambda: self._producer.produce(**produce_kwargs)
             )
 
-            # Poll for delivery reports in background
-            await loop.run_in_executor(self._executor, self._producer.poll, 0)
+            # Start background polling for delivery reports
+            async def poll_until_delivered():
+                """Poll until message is delivered or timeout."""
+                for _ in range(
+                    100
+                ):  # Poll up to 100 times (10 seconds at 0.1s intervals)
+                    await loop.run_in_executor(self._executor, self._producer.poll, 0.1)
+                    if delivery_future.done():
+                        break
+                    await asyncio.sleep(0.01)  # Small delay between polls
 
-            # Wait for delivery confirmation
-            await delivery_future
+            # Start polling task and wait for delivery with timeout
+            poll_task = asyncio.create_task(poll_until_delivered())
+
+            try:
+                # Wait for delivery confirmation with reasonable timeout
+                await asyncio.wait_for(delivery_future, timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"Message delivery timeout for topic {topic}")
+                raise
+            finally:
+                poll_task.cancel()
+                try:
+                    await poll_task
+                except asyncio.CancelledError:
+                    pass
 
         except Exception as e:
             logger.error(f"Failed to produce message to {topic}: {e}")
@@ -232,9 +269,15 @@ class AsyncSmartProducer:
         loop = asyncio.get_event_loop()
 
         try:
-            remaining = await loop.run_in_executor(
-                self._executor, self._producer.flush, timeout
-            )
+            # If timeout is None, use a default timeout or don't pass it
+            if timeout is None:
+                remaining = await loop.run_in_executor(
+                    self._executor, self._producer.flush
+                )
+            else:
+                remaining = await loop.run_in_executor(
+                    self._executor, self._producer.flush, timeout
+                )
             return int(remaining or 0)
 
         except Exception as e:
@@ -276,12 +319,19 @@ class AsyncSmartProducer:
             return
 
         try:
-            # Flush remaining messages before marking as closed
+            # Mark as closed first to prevent new operations
+            self._closed = True
+
+            # Stop health manager first to cancel all async tasks
+            if self._health_manager is not None:
+                await self._health_manager.stop()
+                self._health_manager = None
+
+            # Then flush remaining messages
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(self._executor, self._producer.flush)
 
-            # Close producer - no need for executor since close() is fast
-            self._producer.close()
+            # Producer doesn't have close method - just rely on garbage collection
 
             logger.info("AsyncSmartProducer closed successfully")
 
@@ -290,9 +340,32 @@ class AsyncSmartProducer:
             raise
 
         finally:
-            # Mark as closed and shutdown executor
-            self._closed = True
+            # Shutdown executor last
             self._executor.shutdown(wait=True)
+
+    def __del__(self) -> None:
+        """
+        Cleanup method called when the object is garbage collected.
+
+        This ensures resources are cleaned up even if close() wasn't called.
+        """
+        if not self._closed:
+            try:
+                # We can't call async methods in __del__, so just clean up
+                # sync resources
+                # Health manager async tasks will be cancelled when the event loop
+                # shuts down
+                self._health_manager = None
+
+                # Shutdown executor if not already done
+                if hasattr(self, "_executor") and self._executor:
+                    self._executor.shutdown(wait=False)
+
+            except Exception as e:
+                # Don't raise exceptions in __del__
+                logger.warning(f"Error during AsyncSmartProducer cleanup: {e}")
+
+            self._closed = True
 
     @property
     def topics(self) -> list[str]:

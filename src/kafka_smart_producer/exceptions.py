@@ -45,6 +45,10 @@ class HealthManagerError(SmartProducerError):
     """Raised when health management operations fail."""
 
 
+class HealthCalculationError(SmartProducerError):
+    """Raised when health calculation operations fail."""
+
+
 class CacheError(SmartProducerError):
     """
     Raised when cache operations fail.

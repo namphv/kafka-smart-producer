@@ -50,18 +50,6 @@ from .producer_config import SmartProducerConfig
 from .protocols import LagDataCollector
 from .sync_producer import SmartProducer
 
-# # Threading utilities
-# from .threading import (
-#     SimpleBackgroundRefresh,
-#     create_async_background_task,
-#     create_sync_background_refresh,
-#     run_periodic_async,
-# )
-
-# Default implementations
-# from .collectors import KafkaAdminLagCollector
-# from .calculators import ThresholdHotPartitionCalculator
-
 __all__ = [
     # Protocols
     "LagDataCollector",
@@ -85,11 +73,6 @@ __all__ = [
     "CacheFactory",
     "CacheTimeoutError",
     "CacheUnavailableError",
-    # # Threading utilities
-    # "SimpleBackgroundRefresh",
-    # "run_periodic_async",
-    # "create_async_background_task",
-    # "create_sync_background_refresh",
     # Configuration
     "HealthManagerConfig",
     "SmartProducerConfig",
@@ -99,7 +82,4 @@ __all__ = [
     # Producer classes
     "SmartProducer",
     "AsyncSmartProducer",
-    # Future components
-    # "KafkaAdminLagCollector",
-    # "ThresholdHotPartitionCalculator",
 ]

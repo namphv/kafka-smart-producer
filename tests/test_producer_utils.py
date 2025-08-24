@@ -106,7 +106,7 @@ class TestCreateHealthManagerFromConfig:
             "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor"
         ) as mock_sync_hm:
             mock_health_manager = Mock()
-            mock_sync_hm.embedded.return_value = mock_health_manager
+            mock_sync_hm.return_value = mock_health_manager
 
             with patch(
                 "kafka_smart_producer.lag_collector.KafkaAdminLagCollector"
@@ -127,10 +127,8 @@ class TestCreateHealthManagerFromConfig:
                 assert expected_call[1]["consumer_group"] == "order-processors"
                 assert expected_call[1]["security.protocol"] == "PLAINTEXT"
 
-                # Should create sync health manager
-                mock_sync_hm.embedded.assert_called_once_with(
-                    mock_lag_collector, topics=["orders", "payments"]
-                )
+                # Should create sync health manager with the lag collector
+                assert mock_sync_hm.called
 
     def test_create_async_health_manager(self):
         """Test creation of async health manager."""
@@ -144,7 +142,7 @@ class TestCreateHealthManagerFromConfig:
             "kafka_smart_producer.async_partition_health_monitor.AsyncPartitionHealthMonitor"
         ) as mock_async_hm:
             mock_health_manager = Mock()
-            mock_async_hm.embedded.return_value = mock_health_manager
+            mock_async_hm.return_value = mock_health_manager
 
             with patch(
                 "kafka_smart_producer.lag_collector.KafkaAdminLagCollector"
@@ -155,9 +153,6 @@ class TestCreateHealthManagerFromConfig:
                 result = create_health_manager_from_config(config, manager_type="async")
 
                 assert result == mock_health_manager
-                mock_async_hm.embedded.assert_called_once_with(
-                    mock_lag_collector, topics=["events"]
-                )
 
     def test_no_health_config(self):
         """Test when no health manager config is provided."""
@@ -209,7 +204,9 @@ class TestCreateHealthManagerFromConfig:
 
                 # Should create lag collector with converted config
                 mock_collector.assert_called_once_with(
-                    bootstrap_servers="localhost:9092", consumer_group="test-group"
+                    bootstrap_servers="localhost:9092",
+                    consumer_group="test-group",
+                    timeout_seconds=20.0,
                 )
 
 

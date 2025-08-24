@@ -9,7 +9,11 @@ import logging
 from typing import Any
 
 from confluent_kafka import Consumer, TopicPartition
-from confluent_kafka.admin import AdminClient
+from confluent_kafka.admin import (
+    AdminClient,
+    _ConsumerGroupTopicPartitions,
+    _TopicCollection,
+)
 
 from .exceptions import LagDataUnavailableError
 
@@ -61,6 +65,9 @@ class KafkaAdminLagCollector:
             "session.timeout.ms": int(timeout_seconds * 1000),
         }
 
+        # Cache for topic partition metadata
+        self._topic_partitions_cache: dict[str, list[int]] = {}
+
         logger.info(
             f"KafkaAdminLagCollector initialized for group '{consumer_group}' "
             f"on {bootstrap_servers}"
@@ -80,8 +87,8 @@ class KafkaAdminLagCollector:
             LagDataUnavailableError: When lag data cannot be retrieved
         """
         try:
-            # 1. Get topic metadata to find partition count
-            partitions = self._get_topic_partitions(topic)
+            # 1. Get topic metadata to find partition count (cached)
+            partitions = self._get_topic_partitions_cached(topic)
 
             # 2. Get committed offsets for consumer group
             committed_offsets = self._get_committed_offsets(topic, partitions)
@@ -104,9 +111,15 @@ class KafkaAdminLagCollector:
             return lag_data
 
         except Exception as e:
-            error_msg = f"Failed to collect lag data for topic '{topic}' and \
-                group '{self._consumer_group}'"
+            error_msg = (
+                f"Failed to collect lag data for topic '{topic}' "
+                f"and group '{self._consumer_group}'"
+            )
             logger.error(f"{error_msg}: {e}")
+
+            # Clear cache for this topic in case the error is due to topic changes
+            self.clear_topic_cache(topic)
+
             raise LagDataUnavailableError(
                 error_msg,
                 cause=e,
@@ -117,22 +130,69 @@ class KafkaAdminLagCollector:
                 },
             ) from e
 
+    def _get_topic_partitions_cached(self, topic: str) -> list[int]:
+        """Get list of partition IDs for a topic with caching."""
+        if topic in self._topic_partitions_cache:
+            return self._topic_partitions_cache[topic]
+
+        # Cache miss - fetch and cache the result
+        partitions = self._get_topic_partitions(topic)
+        self._topic_partitions_cache[topic] = partitions
+        return partitions
+
     def _get_topic_partitions(self, topic: str) -> list[int]:
         """Get list of partition IDs for a topic."""
         try:
-            # Get topic metadata
-            metadata = self._admin_client.describe_topics(
-                [topic], request_timeout=self._timeout_seconds
-            )
+            # Method 1: Use describe_topics (more detailed metadata)
+            try:
+                topic_collection = _TopicCollection([topic])
+                metadata = self._admin_client.describe_topics(
+                    topic_collection, request_timeout=self._timeout_seconds
+                )
+                topic_metadata = metadata[topic].result(timeout=self._timeout_seconds)
 
-            topic_metadata = metadata[topic].result(timeout=self._timeout_seconds)
+                # TopicDescription.partitions is a list of TopicPartitionInfo objects
+                partitions = [p.id for p in topic_metadata.partitions]
+                logger.debug(
+                    f"Topic '{topic}' has partitions (describe_topics): {partitions}"
+                )
+                return partitions
 
-            # Extract partition IDs
-            partitions = [p.id for p in topic_metadata.partitions.values()]
+            except Exception as describe_error:
+                logger.debug(
+                    f"describe_topics failed for topic '{topic}': {describe_error}"
+                )
 
-            logger.debug(f"Topic '{topic}' has partitions: {partitions}")
-            return partitions
+                # Method 2: Fallback to list_topics (simpler but reliable)
+                cluster_metadata = self._admin_client.list_topics(
+                    topic=topic, timeout=self._timeout_seconds
+                )
 
+                if topic in cluster_metadata.topics:
+                    topic_metadata = cluster_metadata.topics[topic]
+
+                    # Check for topic-level errors
+                    if topic_metadata.error is not None:
+                        raise LagDataUnavailableError(
+                            f"Topic '{topic}' has error: {topic_metadata.error}",
+                            cause=topic_metadata.error,
+                        ) from topic_metadata.error
+
+                    # TopicMetadata.partitions is a dict with partition_id ->
+                    # PartitionMetadata
+                    partitions = list(topic_metadata.partitions.keys())
+                    logger.debug(
+                        f"Topic '{topic}' has partitions (list_topics): {partitions}"
+                    )
+                    return partitions
+                else:
+                    raise LagDataUnavailableError(
+                        f"Topic '{topic}' not found in cluster", cause=describe_error
+                    ) from describe_error
+
+        except LagDataUnavailableError:
+            # Re-raise our custom exceptions
+            raise
         except Exception as e:
             raise LagDataUnavailableError(
                 f"Failed to get partition metadata for topic '{topic}'", cause=e
@@ -147,19 +207,34 @@ class KafkaAdminLagCollector:
             topic_partitions = [
                 TopicPartition(topic, partition_id) for partition_id in partitions
             ]
+            logger.debug(
+                f"Getting committed offsets for topic '{topic}' "
+                f"partitions: {partitions}"
+            )
 
             # Get committed offsets from AdminClient
+            consumer_group_request = _ConsumerGroupTopicPartitions(
+                self._consumer_group, topic_partitions=topic_partitions
+            )
+
             group_offsets = self._admin_client.list_consumer_group_offsets(
-                self._consumer_group,
-                partitions=topic_partitions,
+                [consumer_group_request],
                 request_timeout=self._timeout_seconds,
             )
 
-            committed_result = group_offsets.result(timeout=self._timeout_seconds)
+            committed_result = group_offsets[self._consumer_group].result(
+                timeout=self._timeout_seconds
+            )
+            logger.debug(f"Committed result type: {type(committed_result)}")
+            logger.debug(f"Committed result: {committed_result}")
 
             # Extract offsets by partition
             committed_offsets = {}
             for tp in committed_result.topic_partitions:
+                logger.debug(
+                    f"Processing topic partition: {tp}, topic: {tp.topic}, "
+                    f"partition: {tp.partition}, offset: {tp.offset}"
+                )
                 if tp.topic == topic:
                     # Handle case where no offset is committed (offset = -1001)
                     offset = tp.offset if tp.offset >= 0 else 0
@@ -169,9 +244,11 @@ class KafkaAdminLagCollector:
             return committed_offsets
 
         except Exception as e:
+            logger.error(f"Error getting committed offsets: {e}")
+            logger.error(f"Exception type: {type(e)}")
             raise LagDataUnavailableError(
-                f"Failed to get committed offsets for group '{self._consumer_group}' \
-                    and topic '{topic}'",
+                f"Failed to get committed offsets for group '{self._consumer_group}' "
+                f"and topic '{topic}'",
                 cause=e,
             ) from e
 
@@ -206,6 +283,20 @@ class KafkaAdminLagCollector:
             raise LagDataUnavailableError(
                 f"Failed to get high water marks for topic '{topic}'", cause=e
             ) from e
+
+    def clear_topic_cache(self, topic: str = None) -> None:
+        """
+        Clear cached topic partition metadata.
+
+        Args:
+            topic: Specific topic to clear (None to clear all)
+        """
+        if topic is None:
+            self._topic_partitions_cache.clear()
+            logger.debug("Cleared all topic partition cache")
+        else:
+            self._topic_partitions_cache.pop(topic, None)
+            logger.debug(f"Cleared partition cache for topic '{topic}'")
 
     def is_healthy(self) -> bool:
         """

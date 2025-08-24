@@ -28,7 +28,8 @@ class TestHealthManagerLifecycle:
                 "health_manager": {
                     "consumer_group": "test-group",
                     "health_threshold": 0.5,
-                    "refresh_interval": 5.0,
+                    "refresh_interval": 10.0,
+                    "timeout_seconds": 5.0,
                 },
             }
         )
@@ -45,11 +46,9 @@ class TestHealthManagerLifecycle:
         )
 
     @patch("kafka_smart_producer.sync_producer.ConfluentProducer")
-    @patch(
-        "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor.from_config"
-    )
+    @patch("kafka_smart_producer.producer_utils.create_health_manager_from_config")
     def test_health_manager_created_and_started(
-        self, mock_from_config, mock_confluent_producer, health_enabled_config
+        self, mock_create_health_manager, mock_confluent_producer, health_enabled_config
     ):
         """Test new behavior: self-created health manager is auto-started."""
         # Mock confluent producer
@@ -58,13 +57,13 @@ class TestHealthManagerLifecycle:
         # Mock health manager instance
         mock_health_manager = Mock()
         mock_health_manager.is_running = False
-        mock_from_config.return_value = mock_health_manager
+        mock_create_health_manager.return_value = mock_health_manager
 
         # Create producer
         producer = SmartProducer(health_enabled_config)
 
         # Verify health manager was created
-        mock_from_config.assert_called_once()
+        mock_create_health_manager.assert_called_once()
         assert producer.health_manager is mock_health_manager
 
         # Verify start() WAS called (new correct behavior)
@@ -180,7 +179,8 @@ class TestHealthManagerLifecycleFixes:
                 "health_manager": {
                     "consumer_group": "test-group",
                     "health_threshold": 0.5,
-                    "refresh_interval": 5.0,
+                    "refresh_interval": 10.0,
+                    "timeout_seconds": 5.0,
                 },
             }
         )
@@ -194,11 +194,11 @@ class TestHealthManagerLifecycleFixes:
             mock_confluent_producer.return_value = Mock()
 
             with patch(
-                "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor.from_config"
-            ) as mock_from_config:
+                "kafka_smart_producer.producer_utils.create_health_manager_from_config"
+            ) as mock_create_health_manager:
                 mock_health_manager = Mock()
                 mock_health_manager.is_running = False
-                mock_from_config.return_value = mock_health_manager
+                mock_create_health_manager.return_value = mock_health_manager
 
                 # Create producer
                 SmartProducer(health_enabled_config)
@@ -235,11 +235,11 @@ class TestHealthManagerLifecycleFixes:
             mock_confluent_producer.return_value = mock_producer_instance
 
             with patch(
-                "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor.from_config"
-            ) as mock_from_config:
+                "kafka_smart_producer.producer_utils.create_health_manager_from_config"
+            ) as mock_create_health_manager:
                 mock_health_manager = Mock()
                 mock_health_manager.is_running = True
-                mock_from_config.return_value = mock_health_manager
+                mock_create_health_manager.return_value = mock_health_manager
 
                 # Create producer
                 producer = SmartProducer(health_enabled_config)
@@ -277,13 +277,13 @@ class TestHealthManagerLifecycleFixes:
             mock_confluent.return_value = Mock()
 
             with patch(
-                "kafka_smart_producer.partition_health_monitor.PartitionHealthMonitor.from_config"
-            ) as mock_from_config:
+                "kafka_smart_producer.producer_utils.create_health_manager_from_config"
+            ) as mock_create_health_manager:
                 # Mock health manager that will return healthy partitions
                 mock_health_manager = Mock()
                 mock_health_manager.is_running = False
                 mock_health_manager.get_healthy_partitions.return_value = [0, 1, 2]
-                mock_from_config.return_value = mock_health_manager
+                mock_create_health_manager.return_value = mock_health_manager
 
                 # Create producer with minimal config
                 producer = SmartProducer(minimal_config)
