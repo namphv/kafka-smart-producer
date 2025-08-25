@@ -41,6 +41,18 @@ class HealthMode(Enum):
     - Independent monitoring service
     """
 
+    REDIS_CONSUMER = auto()
+    """
+    Redis consumer mode for producer integration.
+
+    Characteristics:
+    - Pure health data consumer from Redis
+    - No lag collection or health calculation
+    - Reads pre-calculated health data from Redis
+    - Optimized for producer instances that consume external health data
+    - Completely independent from health monitoring services
+    """
+
     def __str__(self) -> str:
         """String representation for logging."""
         return self.name.lower()
@@ -62,6 +74,7 @@ class HealthMode(Enum):
         mode_map = {
             "embedded": cls.EMBEDDED,
             "standalone": cls.STANDALONE,
+            "redis_consumer": cls.REDIS_CONSUMER,
         }
 
         normalized = mode_str.lower().strip()

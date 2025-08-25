@@ -1,8 +1,8 @@
 """
-Unified configuration for health managers.
+Unified configuration for partition health monitors.
 
 This module provides a single configuration interface that works for both
-sync and async health managers, with optional context-specific customization.
+sync and async partition health monitors, with optional context-specific customization.
 """
 
 from dataclasses import dataclass
@@ -10,9 +10,9 @@ from typing import Any, Optional
 
 
 @dataclass(frozen=True)
-class HealthManagerConfig:
+class PartitionHealthMonitorConfig:
     """
-    Unified configuration for both Partition Health Monitor class.
+    Unified configuration for both Partition Health Monitor classes.
 
     This configuration works for both execution contexts and allows optional
     context-specific customization through sync_options and async_options.
@@ -20,13 +20,13 @@ class HealthManagerConfig:
     Example:
         # Simple config (works for both sync and async)
 
-        config = HealthManagerConfig(
+        config = PartitionHealthMonitorConfig(
             consumer_group='my-group',
             health_threshold=0.8
         )
 
         # Advanced config with context-specific options
-        config = HealthManagerConfig(
+        config = PartitionHealthMonitorConfig(
             consumer_group='my-group',
             health_threshold=0.8,
             sync_options={'thread_pool_size': 8},

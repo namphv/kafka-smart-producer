@@ -10,7 +10,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Optional, Union
 
-from .health_config import HealthManagerConfig
+from .health_config import PartitionHealthMonitorConfig
 from .health_mode import HealthMode
 from .health_utils import (
     calculate_health_scores,
@@ -221,7 +221,7 @@ class AsyncPartitionHealthMonitor:
 
     @classmethod
     def from_config(
-        cls, health_config: "HealthManagerConfig", kafka_config: dict[str, Any]
+        cls, health_config: "PartitionHealthMonitorConfig", kafka_config: dict[str, Any]
     ) -> "AsyncPartitionHealthMonitor":
         """
         Factory method to create AsyncPartitionHealthMonitor from unified configuration.
@@ -241,12 +241,12 @@ class AsyncPartitionHealthMonitor:
         if not isinstance(kafka_config, dict):
             raise ValueError("Kafka configuration must be a dictionary")
 
-        if not isinstance(health_config, HealthManagerConfig):
+        if not isinstance(health_config, PartitionHealthMonitorConfig):
             raise ValueError(
-                "Health configuration must be a HealthManagerConfig instance"
+                "Health configuration must be a PartitionHealthMonitorConfig instance"
             )
 
-        # Extract common settings (already validated by HealthManagerConfig)
+        # Extract common settings (already validated by PartitionHealthMonitorConfig)
         health_threshold = health_config.health_threshold
         refresh_interval = health_config.refresh_interval
         max_lag_for_health = health_config.max_lag_for_health

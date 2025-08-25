@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .caching import CacheConfig
-from .health_config import HealthManagerConfig
+from .health_config import PartitionHealthMonitorConfig
 
 
 @dataclass
@@ -49,13 +49,18 @@ class SmartProducerConfig:
     health_manager: Optional[dict[str, Any]] = None
     cache: Optional[dict[str, Any]] = None
 
+    # Health mode configuration
+    health_mode: Optional[str] = None  # "embedded", "standalone", or "redis_consumer"
+
     # Producer-level settings with defaults
     smart_enabled: bool = True
     key_stickiness: bool = True
 
     # Internal composed configuration objects (created automatically)
     _cache_config: CacheConfig = field(init=False)
-    _health_config: Optional[HealthManagerConfig] = field(init=False, default=None)
+    _health_config: Optional[PartitionHealthMonitorConfig] = field(
+        init=False, default=None
+    )
 
     def __post_init__(self) -> None:
         """Create internal configuration objects and validate."""
@@ -98,11 +103,11 @@ class SmartProducerConfig:
             redis_ssl_keyfile=cache_dict.get("redis_ssl_keyfile"),
         )
 
-    def _create_health_config(self) -> HealthManagerConfig:
-        """Create HealthManagerConfig from user health_manager dict."""
+    def _create_health_config(self) -> PartitionHealthMonitorConfig:
+        """Create PartitionHealthMonitorConfig from user health_manager dict."""
         if not self.health_manager:
             raise ValueError(
-                "health_manager dict is required to create HealthManagerConfig"
+                "health_manager dict is required to create PartitionHealthMonitorConfig"
             )
 
         hm_dict = self.health_manager
@@ -111,7 +116,7 @@ class SmartProducerConfig:
         if "consumer_group" not in hm_dict:
             raise ValueError("health_manager must include 'consumer_group'")
 
-        return HealthManagerConfig(
+        return PartitionHealthMonitorConfig(
             consumer_group=hm_dict["consumer_group"],
             health_threshold=hm_dict.get("health_threshold", 0.5),
             refresh_interval=hm_dict.get("refresh_interval", 30.0),
@@ -124,12 +129,12 @@ class SmartProducerConfig:
             async_options=hm_dict.get("async_options"),
         )
 
-    def _create_health_config_from_consumer_group(self) -> HealthManagerConfig:
-        """Create HealthManagerConfig from top-level consumer_group with defaults."""
+    def _create_health_config_from_consumer_group(self) -> PartitionHealthMonitorConfig:
+        """Create PartitionHealthMonitorConfig from top-level consumer_group."""
         if not self.consumer_group:
             raise ValueError("consumer_group is required to create health config")
 
-        return HealthManagerConfig(
+        return PartitionHealthMonitorConfig(
             consumer_group=self.consumer_group,
             health_threshold=0.5,
             refresh_interval=30.0,
@@ -147,7 +152,7 @@ class SmartProducerConfig:
         return self._cache_config
 
     @property
-    def health_config(self) -> Optional[HealthManagerConfig]:
+    def health_config(self) -> Optional[PartitionHealthMonitorConfig]:
         """Get health manager configuration object (None if not configured)."""
         return self._health_config
 
@@ -218,6 +223,7 @@ class SmartProducerConfig:
             "topics",
             "consumer_group",
             "health_manager",
+            "health_mode",
             "cache",
             "smart_enabled",
             "key_stickiness",
@@ -230,6 +236,7 @@ class SmartProducerConfig:
         # Extract optional configurations
         consumer_group = config_dict.get("consumer_group")
         health_manager = config_dict.get("health_manager")
+        health_mode = config_dict.get("health_mode")
         cache = config_dict.get("cache")
         smart_enabled = config_dict.get("smart_enabled", True)
         key_stickiness = config_dict.get("key_stickiness", True)
@@ -239,6 +246,7 @@ class SmartProducerConfig:
             topics=topics,
             consumer_group=consumer_group,
             health_manager=health_manager,
+            health_mode=health_mode,
             cache=cache,
             smart_enabled=smart_enabled,
             key_stickiness=key_stickiness,

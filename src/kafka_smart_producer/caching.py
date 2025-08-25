@@ -446,7 +446,11 @@ class DefaultRemoteCache:
             state_data = self._redis.get(state_key)
 
             if state_data:
-                health_payload = json.loads(state_data.decode("utf-8"))
+                # Handle both string (decode_responses=True) and bytes data
+                if isinstance(state_data, bytes):
+                    health_payload = json.loads(state_data.decode("utf-8"))
+                else:
+                    health_payload = json.loads(state_data)
                 partitions_data = health_payload.get("partitions", {})
 
                 # Convert string keys back to integers

@@ -2,13 +2,12 @@
 Partition Health Monitor using threading for background monitoring.
 """
 
-import json
 import logging
 import threading
 import time
 from typing import TYPE_CHECKING, Any, Optional, Union
 
-from .health_config import HealthManagerConfig
+from .health_config import PartitionHealthMonitorConfig
 from .health_mode import HealthMode
 from .health_utils import (
     collect_and_calculate_health,
@@ -207,7 +206,7 @@ class PartitionHealthMonitor:
 
     @classmethod
     def from_config(
-        cls, health_config: "HealthManagerConfig", kafka_config: dict[str, Any]
+        cls, health_config: "PartitionHealthMonitorConfig", kafka_config: dict[str, Any]
     ) -> "PartitionHealthMonitor":
         """
         Factory method to create PartitionHealthMonitor from unified configuration.
@@ -226,12 +225,12 @@ class PartitionHealthMonitor:
         if not isinstance(kafka_config, dict):
             raise ValueError("Kafka configuration must be a dictionary")
 
-        if not isinstance(health_config, HealthManagerConfig):
+        if not isinstance(health_config, PartitionHealthMonitorConfig):
             raise ValueError(
-                "Health configuration must be a HealthManagerConfig instance"
+                "Health configuration must be a PartitionHealthMonitorConfig instance"
             )
 
-        # Extract common settings (already validated by HealthManagerConfig)
+        # Extract common settings (already validated by PartitionHealthMonitorConfig)
         health_threshold = health_config.health_threshold
         refresh_interval = health_config.refresh_interval
         max_lag_for_health = health_config.max_lag_for_health
@@ -495,37 +494,15 @@ class PartitionHealthMonitor:
             return
 
         try:
-            current_time = time.time()
-
-            # Prepare health data payload
-            health_payload = {
-                "topic": topic,
-                "partitions": json.dumps(health_data),
-                "timestamp": current_time,
-                "healthy_count": sum(
-                    1
-                    for score in health_data.values()
-                    if score >= self._health_threshold
-                ),
-                "total_count": len(health_data),
-            }
-
-            # Store current health state with TTL
-            state_key = f"kafka_health:state:{topic}"
-            self._redis_publisher.set(state_key, health_payload, 300)  # 5 minute TTL
-
-            # Also store healthy partitions list for quick producer access
-            healthy_partitions = [
-                pid
-                for pid, score in health_data.items()
-                if score >= self._health_threshold
-            ]
-            healthy_key = f"kafka_health:healthy:{topic}"
-            self._redis_publisher.set(healthy_key, json.dumps(healthy_partitions), 300)
+            # Use the standardized publish_health_data method from DefaultRemoteCache
+            # This ensures compatibility with Redis health consumers
+            self._redis_publisher.publish_health_data(
+                topic, health_data, self._health_threshold
+            )
 
             logger.debug(
                 f"Published health to Redis for topic '{topic}': "
-                f"{len(health_data)} partitions, {len(healthy_partitions)} healthy"
+                f"{len(health_data)} partitions using standardized format"
             )
 
         except Exception as e:

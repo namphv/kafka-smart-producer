@@ -2,13 +2,13 @@
 Tests for SmartProducerConfig facade pattern and unified configuration.
 
 This module tests the SmartProducerConfig class that implements the facade pattern
-for managing CacheConfig and HealthManagerConfig internally.
+for managing CacheConfig and PartitionHealthMonitorConfig internally.
 """
 
 import pytest
 
 from kafka_smart_producer.caching import CacheConfig
-from kafka_smart_producer.health_config import HealthManagerConfig
+from kafka_smart_producer.health_config import PartitionHealthMonitorConfig
 from kafka_smart_producer.producer_config import SmartProducerConfig
 
 
@@ -47,7 +47,7 @@ class TestSmartProducerConfig:
             "consumer_group": "order-consumers",
             "refresh_interval": 30.0,
         }
-        assert isinstance(config.health_config, HealthManagerConfig)
+        assert isinstance(config.health_config, PartitionHealthMonitorConfig)
         assert config.health_config.consumer_group == "order-consumers"
         assert config.health_config.refresh_interval == 30.0
 

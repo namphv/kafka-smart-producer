@@ -180,7 +180,7 @@ class TestCreateHealthManagerFromConfig:
                 create_health_manager_from_config(config)
 
     def test_health_config_dict_conversion(self):
-        """Test conversion of dict health config to HealthManagerConfig."""
+        """Test conversion of dict health config to PartitionHealthMonitorConfig."""
         config = SmartProducerConfig(
             kafka_config={"bootstrap.servers": "localhost:9092"},
             topics=["test-topic"],

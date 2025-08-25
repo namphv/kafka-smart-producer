@@ -89,13 +89,32 @@ class SmartProducer:
         )
 
     def _create_health_manager(self) -> Optional["PartitionHealthMonitor"]:
-        """Create PartitionHealthMonitor from config if health_manager is configured."""
+        """Create health manager from config based on health_mode."""
         if not self._config.health_config:
             return None
 
+        # Check if Redis consumer mode is requested
+        if self._config.health_mode == "redis_consumer":
+            return self._create_redis_health_consumer()
+
+        # Default to embedded health manager
         from .producer_utils import create_health_manager_from_config
 
         return create_health_manager_from_config(self._config, "sync")
+
+    def _create_redis_health_consumer(self):
+        """Create Redis health consumer for redis_consumer mode."""
+        # Redis consumer mode requires a cache with health data support
+        cache = self._create_cache()
+        if not cache or not hasattr(cache, "get_health_data"):
+            raise ValueError(
+                "Redis consumer mode requires a cache with health data support. "
+                "Enable remote_enabled=True in cache config."
+            )
+
+        from .producer_utils import create_redis_health_consumer_from_config
+
+        return create_redis_health_consumer_from_config(self._config, cache)
 
     def _create_cache(self):
         """Create cache from config."""

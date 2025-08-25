@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .caching import DefaultHybridCache, DefaultLocalCache, DefaultRemoteCache
     from .partition_health_monitor import PartitionHealthMonitor
     from .producer_config import SmartProducerConfig
+    from .redis_health_consumer import RedisHealthConsumer
 
 # Type aliases
 HealthManagerType = Union["PartitionHealthMonitor", "AsyncPartitionHealthMonitor"]
@@ -100,6 +101,69 @@ def create_cache_from_config(config: "SmartProducerConfig") -> Optional[CacheTyp
         )
 
 
+def create_redis_health_consumer_from_config(
+    config: "SmartProducerConfig", cache: CacheType
+) -> Optional["RedisHealthConsumer"]:
+    """
+    Create Redis health consumer from SmartProducerConfig.
+
+    Args:
+        config: Producer configuration
+        cache: Cache instance (must support health data retrieval)
+
+    Returns:
+        RedisHealthConsumer instance or None
+
+    Raises:
+        RuntimeError: If Redis health consumer creation fails
+        ValueError: If cache doesn't support health data operations
+    """
+    health_config = config.health_config
+    if not health_config:
+        return None
+
+    try:
+        from .redis_health_consumer import (
+            HybridRedisHealthConsumer,
+            RedisHealthConsumer,
+        )
+
+        # Check if cache supports health data operations
+        if hasattr(cache, "get_health_data"):
+            # Direct Redis or Hybrid cache
+            if hasattr(cache, "_remote"):
+                # HybridCache - create HybridRedisHealthConsumer
+                redis_consumer = HybridRedisHealthConsumer(
+                    hybrid_cache=cache,
+                    health_threshold=health_config.health_threshold,
+                )
+                logger.info(
+                    f"Created HybridRedisHealthConsumer with threshold: "
+                    f"{health_config.health_threshold}"
+                )
+            else:
+                # Direct Redis cache
+                redis_consumer = RedisHealthConsumer(
+                    redis_cache=cache,
+                    health_threshold=health_config.health_threshold,
+                )
+                logger.info(
+                    f"Created RedisHealthConsumer with threshold: "
+                    f"{health_config.health_threshold}"
+                )
+
+            return redis_consumer
+        else:
+            raise ValueError(
+                "Cache instance must support health data operations "
+                "(get_health_data method)"
+            )
+
+    except Exception as e:
+        logger.error(f"Failed to create Redis health consumer from config: {e}")
+        raise RuntimeError(f"Redis health consumer creation failed: {e}") from e
+
+
 def create_health_manager_from_config(
     config: "SmartProducerConfig", manager_type: str = "sync"
 ) -> Optional[HealthManagerType]:
@@ -123,7 +187,7 @@ def create_health_manager_from_config(
     try:
         from .lag_collector import KafkaAdminLagCollector
 
-        # health_config is already a HealthManagerConfig
+        # health_config is already a PartitionHealthMonitorConfig
         health_manager_config = health_config
 
         # Create lag collector

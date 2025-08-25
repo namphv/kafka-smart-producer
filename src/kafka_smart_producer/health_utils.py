@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 
 if TYPE_CHECKING:
     from .caching import DefaultHybridCache, DefaultLocalCache, DefaultRemoteCache
-    from .health_config import HealthManagerConfig
+    from .health_config import PartitionHealthMonitorConfig
     from .protocols import LagDataCollector
 
 CacheBackend = Union["DefaultLocalCache", "DefaultRemoteCache", "DefaultHybridCache"]
@@ -107,13 +107,13 @@ def collect_and_calculate_health(
 
 
 def create_lag_collector_from_config(
-    health_config: "HealthManagerConfig", kafka_config: dict[str, Any]
+    health_config: "PartitionHealthMonitorConfig", kafka_config: dict[str, Any]
 ) -> "LagDataCollector":
     """
     Create lag collector from configuration.
 
     Args:
-        health_config: HealthManagerConfig instance
+        health_config: PartitionHealthMonitorConfig instance
         kafka_config: Kafka configuration
 
     Returns:
@@ -149,13 +149,13 @@ def create_lag_collector_from_config(
 
 
 def create_cache_from_config(
-    health_config: "HealthManagerConfig",
+    health_config: "PartitionHealthMonitorConfig",
 ) -> Optional[CacheBackend]:
     """
-    Create cache backend from HealthManagerConfig.
+    Create cache backend from PartitionHealthMonitorConfig.
 
     Args:
-        health_config: HealthManagerConfig instance
+        health_config: PartitionHealthMonitorConfig instance
 
     Returns:
         Configured cache backend or None if disabled

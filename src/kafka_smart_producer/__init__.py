@@ -42,12 +42,15 @@ from .exceptions import (
 )
 
 # Configuration
-from .health_config import HealthManagerConfig
+from .health_config import PartitionHealthMonitorConfig
 from .partition_health_monitor import PartitionHealthMonitor
 from .producer_config import SmartProducerConfig
 
 # Core protocol interfaces
 from .protocols import LagDataCollector
+
+# Redis health consumer
+from .redis_health_consumer import HybridRedisHealthConsumer, RedisHealthConsumer
 from .sync_producer import SmartProducer
 
 __all__ = [
@@ -74,11 +77,13 @@ __all__ = [
     "CacheTimeoutError",
     "CacheUnavailableError",
     # Configuration
-    "HealthManagerConfig",
+    "PartitionHealthMonitorConfig",
     "SmartProducerConfig",
     # Health management
     "PartitionHealthMonitor",
     "AsyncPartitionHealthMonitor",
+    "RedisHealthConsumer",
+    "HybridRedisHealthConsumer",
     # Producer classes
     "SmartProducer",
     "AsyncSmartProducer",
