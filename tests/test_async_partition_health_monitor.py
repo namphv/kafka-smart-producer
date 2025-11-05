@@ -798,8 +798,13 @@ class TestAsyncPartitionHealthEdgeCases:
         topic = "test-topic"
         health_monitor._initialize_topics([topic])
 
-        # Start health monitor so _running is True
+        # Start health monitor so _running is True (triggers initial refresh)
         await health_monitor.start()
+
+        # Wait for initial refresh to complete and reset counter
+        await asyncio.sleep(0.2)
+        lag_collector.call_count = 0
+        lag_collector.calls.clear()
 
         try:
             # Set initial lag data
@@ -814,9 +819,9 @@ class TestAsyncPartitionHealthEdgeCases:
                 "Force refresh should update health data"
             )
 
-            # Verify call count
+            # Verify call count (after counter reset, only counts force_refresh)
             assert lag_collector.call_count == 1, (
-                "Force refresh should call lag collector once"
+                "Force refresh should call lag collector once (after counter reset)"
             )
 
             # Test force refresh on non-existent topic (should not crash)
