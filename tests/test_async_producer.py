@@ -1,793 +1,208 @@
-"""
-Tests for the AsyncSmartProducer implementation.
+"""Tests for AsyncSmartProducer."""
 
-This module tests the async functionality including proper async/await patterns,
-delivery callbacks, and integration with the health manager.
-"""
+from __future__ import annotations
 
-import asyncio
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kafka_smart_producer.async_producer import AsyncSmartProducer
-from kafka_smart_producer.producer_config import SmartProducerConfig
+from kafka_smart_producer.config import SmartProducerConfig
 
 
-class MockAsyncPartitionHealthMonitor:
-    """Mock AsyncPartitionHealthMonitor for testing."""
-
-    def __init__(self, healthy_partitions: dict[str, list[int]]):
-        self._healthy_partitions = healthy_partitions
-        self._selection_calls = []
-        self._health_check_calls = []
-
-    def select_partition(self, topic: str, key: bytes) -> int:
-        self._selection_calls.append((topic, key))
-        healthy = self._healthy_partitions.get(topic, [0])
-        return healthy[0] if healthy else 0
-
-    def is_partition_healthy(self, topic: str, partition: int) -> bool:
-        call = (topic, partition)
-        self._health_check_calls.append(call)
-        return partition in self._healthy_partitions.get(topic, [])
-
-    def get_selection_calls(self):
-        return self._selection_calls
-
-    def get_health_check_calls(self):
-        return self._health_check_calls
-
-    async def start_monitoring(self, topics: list[str]):
-        """Mock async start_monitoring method."""
-
-    async def stop(self):
-        """Mock async stop method."""
+def _config(**overrides):
+    defaults = {
+        "kafka_config": {"bootstrap.servers": "localhost:9092"},
+        "topics": ["test-topic"],
+        "consumer_group": "test-group",
+    }
+    defaults.update(overrides)
+    return SmartProducerConfig(**defaults)
 
 
-@pytest.fixture
-def basic_config():
-    """Basic Kafka configuration for testing."""
-    return SmartProducerConfig.from_dict(
-        {
-            "bootstrap.servers": "localhost:9092",
-            "client.id": "test-async-producer",
-            "topics": ["logs"],
-        }
-    )
+class MockMonitor:
+    """Minimal monitor mock matching PartitionHealthMonitor interface."""
+
+    def __init__(self, healthy=None):
+        self._healthy = healthy or {}
+        self._running = False
+
+    def get_healthy_partitions(self, topic):
+        return self._healthy.get(topic, [])
+
+    def is_partition_healthy(self, topic, pid):
+        return pid in self._healthy.get(topic, [])
+
+    async def start_async(self):
+        self._running = True
+
+    async def stop_async(self):
+        self._running = False
+
+    @property
+    def is_running(self):
+        return self._running
 
 
-@pytest.fixture
-def async_partition_health_monitor():
-    """Mock AsyncPartitionHealthMonitor with test partitions."""
-    return MockAsyncPartitionHealthMonitor(
-        {
-            "test-topic": [0, 1, 2],
-            "other-topic": [1, 3],
-        }
-    )
-
-
-@pytest.fixture
-def mock_confluent_producer():
-    """Mock the confluent-kafka Producer for testing."""
-    with patch("kafka_smart_producer.async_producer.ConfluentProducer") as mock_class:
-        mock_instance = MagicMock()
-        mock_class.return_value = mock_instance
-
-        # Mock the poll method to return 0 (no events)
-        mock_instance.poll.return_value = 0
-
-        # Mock the flush method
-        mock_instance.flush.return_value = 0
-
-        # Mock the close method
-        mock_instance.close.return_value = None
-
-        # Mock the list_topics method
-        mock_metadata = MagicMock()
-        mock_metadata.topics = {"test-topic": MagicMock()}
-        mock_instance.list_topics.return_value = mock_metadata
-
-        yield mock_class, mock_instance
-
-
-class TestAsyncSmartProducerInitialization:
-    """Test AsyncSmartProducer initialization."""
-
-    def test_basic_initialization(self, mock_confluent_producer, basic_config):
-        """Test basic initialization of AsyncSmartProducer."""
-        mock_class, _ = mock_confluent_producer
-
-        producer = AsyncSmartProducer(basic_config)
-
-        # Should create confluent-kafka producer
-        mock_class.assert_called_once()
-
-        # Should not be closed initially
-        assert not producer.closed
-
-        # Should have executor
-        assert producer._executor is not None
-
-    def test_initialization_with_async_partition_health_monitor(
-        self, mock_confluent_producer, basic_config, async_partition_health_monitor
-    ):
-        """Test initialization with async partition health monitor."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        producer = AsyncSmartProducer(
-            basic_config, async_partition_health_monitor, max_workers=8
-        )
-
-        # Should create confluent-kafka producer
-        mock_class.assert_called_once()
-
-        # Should have the async partition health monitor
-        assert producer._health_manager is async_partition_health_monitor
-
-        # Should use custom max_workers
-        assert producer._executor._max_workers == 8
-
-
-class TestAsyncProduceMethod:
-    """Test async produce method."""
-
-    @pytest.mark.asyncio
-    async def test_successful_produce(self, mock_confluent_producer, basic_config):
-        """Test successful message production."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        # Mock successful produce call - don't call callback immediately
-        # The callback will be triggered by poll() calls
-        stored_callbacks = []
-
-        def mock_produce(**kwargs):
-            # Store callback for later - real producer doesn't call it immediately
-            callback = kwargs["on_delivery"]
-            topic = kwargs["topic"]
-            stored_callbacks.append((callback, topic))
-
-        def mock_poll(timeout):
-            # Simulate delivery during poll
-            if stored_callbacks:
-                callback, topic = stored_callbacks.pop(0)
-                callback(
-                    None,
-                    MagicMock(
-                        topic=lambda: topic, partition=lambda: 0, offset=lambda: 123
-                    ),
-                )
-            return 0
-
-        mock_instance.produce.side_effect = mock_produce
-        mock_instance.poll.side_effect = mock_poll
-
-        with patch.object(
-            AsyncSmartProducer, "_create_health_manager", return_value=None
+class TestAsyncSmartProducer:
+    @pytest.fixture(autouse=True)
+    def _patch_kafka(self):
+        with (
+            patch(
+                "kafka_smart_producer.producer.ConfluentProducer"
+            ) as mock_producer_cls,
+            patch("kafka_smart_producer.producer._build_monitor") as mock_build,
         ):
-            producer = AsyncSmartProducer(basic_config)
+            self.mock_producer_cls = mock_producer_cls
+            self.mock_producer = mock_producer_cls.return_value
+            self.mock_build = mock_build
+            self.mock_build.return_value = None
 
-        # Should complete without error
-        await producer.produce("test-topic", value=b"test-value", key=b"test-key")
+            # Make produce trigger delivery callback immediately
+            def _produce_with_delivery(**kwargs):
+                cb = kwargs.get("on_delivery")
+                if cb:
+                    cb(None, MagicMock())  # no error, mock message
 
-        # Should have called sync producer
-        mock_instance.produce.assert_called_once()
-        # Async producer polls with 0.1s timeout in background, not 0
-        assert mock_instance.poll.called
-
-    @pytest.mark.asyncio
-    async def test_produce_with_delivery_callback(
-        self, mock_confluent_producer, basic_config
-    ):
-        """Test produce with user-provided delivery callback."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        user_callback = Mock()
-
-        def mock_produce(**kwargs):
-            # Simulate successful delivery
-            callback = kwargs["on_delivery"]
-            topic = kwargs["topic"]
-            mock_msg = MagicMock(
-                topic=lambda: topic, partition=lambda: 0, offset=lambda: 123
-            )
-            callback(None, mock_msg)
-
-        mock_instance.produce.side_effect = mock_produce
-
-        producer = AsyncSmartProducer(basic_config)
-
-        await producer.produce(
-            "test-topic",
-            value=b"test-value",
-            key=b"test-key",
-            on_delivery=user_callback,
-        )
-
-        # User callback should have been called
-        user_callback.assert_called_once()
+            self.mock_producer.produce.side_effect = _produce_with_delivery
+            self.mock_producer.poll.return_value = 0
+            yield
 
     @pytest.mark.asyncio
-    async def test_produce_delivery_failure(
-        self, mock_confluent_producer, basic_config
-    ):
-        """Test produce with delivery failure."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        def mock_produce(**kwargs):
-            # Simulate delivery failure
-            callback = kwargs["on_delivery"]
-            callback(Exception("Delivery failed"), None)
-
-        mock_instance.produce.side_effect = mock_produce
-
-        producer = AsyncSmartProducer(basic_config)
-
-        # Should raise exception on delivery failure
-        with pytest.raises(Exception, match="Message delivery failed"):
-            await producer.produce("test-topic", value=b"test-value", key=b"test-key")
-
-    @pytest.mark.asyncio
-    async def test_produce_when_closed(self, mock_confluent_producer, basic_config):
-        """Test produce when producer is closed."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        producer = AsyncSmartProducer(basic_config)
-        await producer.close()
-
-        # Should raise RuntimeError when closed
-        with pytest.raises(RuntimeError, match="AsyncSmartProducer is closed"):
-            await producer.produce("test-topic", value=b"test-value")
-
-    @pytest.mark.asyncio
-    async def test_concurrent_produce(self, mock_confluent_producer, basic_config):
-        """Test concurrent message production."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        def mock_produce(**kwargs):
-            # Simulate successful delivery
-            callback = kwargs["on_delivery"]
-            topic = kwargs["topic"]
-            callback = kwargs["on_delivery"]
-            topic = kwargs["topic"]
-            callback(
-                None,
-                MagicMock(topic=lambda: topic, partition=lambda: 0, offset=lambda: 123),
-            )
-
-        mock_instance.produce.side_effect = mock_produce
-
-        with patch.object(
-            AsyncSmartProducer, "_create_health_manager", return_value=None
-        ):
-            producer = AsyncSmartProducer(basic_config)
-
-        # Produce multiple messages concurrently
-        tasks = [
-            producer.produce(
-                "test-topic", value=f"value{i}".encode(), key=f"key{i}".encode()
-            )
-            for i in range(10)
-        ]
-
-        # Should complete all tasks successfully
-        await asyncio.gather(*tasks)
-
-        # Should have called produce for each message
-        assert mock_instance.produce.call_count == 10
-        # Poll should be called (background polling), but exact count varies
-
-
-class TestAsyncFlushMethod:
-    """Test async flush method."""
-
-    @pytest.mark.asyncio
-    async def test_successful_flush(self, mock_confluent_producer, basic_config):
-        """Test successful flush operation."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        mock_instance.flush.return_value = 0  # No messages remaining
-
-        producer = AsyncSmartProducer(basic_config)
-
-        remaining = await producer.flush(timeout=10.0)
-
-        assert remaining == 0
-        mock_instance.flush.assert_called_once_with(10.0)
-
-    @pytest.mark.asyncio
-    async def test_flush_when_closed(self, mock_confluent_producer, basic_config):
-        """Test flush when producer is closed."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        producer = AsyncSmartProducer(basic_config)
-        await producer.close()
-
-        # Should return 0 when closed
-        remaining = await producer.flush()
-        assert remaining == 0
-
-        # Should have called sync producer flush once during close()
-        # No additional calls after close
-        mock_instance.flush.assert_called_once()
-
-
-class TestAsyncPollMethod:
-    """Test async poll method."""
-
-    @pytest.mark.asyncio
-    async def test_successful_poll(self, mock_confluent_producer, basic_config):
-        """Test successful poll operation."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        mock_instance.poll.return_value = 5  # 5 events processed
-
-        producer = AsyncSmartProducer(basic_config)
-
-        events = await producer.poll(timeout=1.0)
-
-        assert events == 5
-        mock_instance.poll.assert_called_with(1.0)
-
-    @pytest.mark.asyncio
-    async def test_poll_when_closed(self, mock_confluent_producer, basic_config):
-        """Test poll when producer is closed."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        producer = AsyncSmartProducer(basic_config)
-        await producer.close()
-
-        # Should return 0 when closed
-        events = await producer.poll()
-        assert events == 0
-
-
-class TestAsyncCloseMethod:
-    """Test async close method."""
-
-    @pytest.mark.asyncio
-    async def test_successful_close(self, mock_confluent_producer, basic_config):
-        """Test successful close operation."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        with patch.object(
-            AsyncSmartProducer, "_create_health_manager", return_value=None
-        ):
-            producer = AsyncSmartProducer(basic_config)
-
-        await producer.close()
-
-        # Should be marked as closed
-        assert producer.closed
-
-        # Should have called sync producer flush method via executor
-        assert mock_instance.flush.called
-
-    @pytest.mark.asyncio
-    async def test_close_idempotent(self, mock_confluent_producer, basic_config):
-        """Test that close is idempotent."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        with patch.object(
-            AsyncSmartProducer, "_create_health_manager", return_value=None
-        ):
-            producer = AsyncSmartProducer(basic_config)
-
-        # Close multiple times
-        await producer.close()
-        await producer.close()
-        await producer.close()
-
-        # Should be marked as closed
-        assert producer.closed
-
-
-class TestAsyncContextManager:
-    """Test async context manager functionality."""
-
-    @pytest.mark.asyncio
-    async def test_async_context_manager(self, mock_confluent_producer, basic_config):
-        """Test async context manager usage."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        def mock_produce(**kwargs):
-            callback = kwargs["on_delivery"]
-            topic = kwargs["topic"]
-            callback(
-                None,
-                MagicMock(topic=lambda: topic, partition=lambda: 0, offset=lambda: 123),
-            )
-
-        mock_instance.produce.side_effect = mock_produce
-
-        # Use as async context manager
-        with patch.object(
-            AsyncSmartProducer, "_create_health_manager", return_value=None
-        ):
-            async with AsyncSmartProducer(basic_config) as producer:
-                await producer.produce(
-                    "test-topic", value=b"test-value", key=b"test-key"
-                )
-
-                # Should not be closed inside context
-                assert not producer.closed
-
-            # Should be closed after context exit
-            assert producer.closed
-
-
-class TestErrorHandling:
-    """Test error handling scenarios."""
-
-    @pytest.mark.asyncio
-    async def test_produce_executor_error(self, mock_confluent_producer, basic_config):
-        """Test error handling in produce method."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        # Mock produce to raise exception
-        mock_instance.produce.side_effect = Exception("Produce failed")
-
-        producer = AsyncSmartProducer(basic_config)
-
-        # Should propagate exception
-        with pytest.raises(Exception, match="Produce failed"):
-            await producer.produce("test-topic", value=b"test-value")
-
-    @pytest.mark.asyncio
-    async def test_user_callback_error(self, mock_confluent_producer, basic_config):
-        """Test error handling when user callback raises exception."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        def mock_produce(**kwargs):
-            callback = kwargs["on_delivery"]
-            topic = kwargs["topic"]
-            callback(
-                None,
-                MagicMock(topic=lambda: topic, partition=lambda: 0, offset=lambda: 123),
-            )
-
-        mock_instance.produce.side_effect = mock_produce
-
-        def failing_callback(err, msg):
-            raise ValueError("Callback failed")
-
-        producer = AsyncSmartProducer(basic_config)
-
-        # Should propagate callback exception
-        with pytest.raises(ValueError, match="Callback failed"):
-            await producer.produce(
-                "test-topic", value=b"test-value", on_delivery=failing_callback
-            )
-
-
-class TestRealWorldUsage:
-    """Test real-world usage patterns."""
-
-    @pytest.mark.asyncio
-    async def test_batch_processing(self, mock_confluent_producer, basic_config):
-        """Test batch processing pattern."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        def mock_produce(**kwargs):
-            callback = kwargs["on_delivery"]
-            topic = kwargs["topic"]
-            callback(
-                None,
-                MagicMock(topic=lambda: topic, partition=lambda: 0, offset=lambda: 123),
-            )
-
-        mock_instance.produce.side_effect = mock_produce
-
-        producer = AsyncSmartProducer(basic_config)
-
-        # Simulate processing a batch of events
-        events = [{"user_id": f"user{i}", "event": f"event{i}"} for i in range(20)]
-
-        tasks = []
-        for event in events:
-            task = producer.produce(
-                "events", key=event["user_id"].encode(), value=str(event).encode()
-            )
-            tasks.append(task)
-
-        # Process all events concurrently
-        await asyncio.gather(*tasks)
-
-        # Should have processed all events
-        assert mock_instance.produce.call_count == 20
-
-        # Cleanup
-        await producer.close()
-
-    @pytest.mark.asyncio
-    async def test_producer_lifecycle(self, mock_confluent_producer, basic_config):
-        """Test complete producer lifecycle."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        def mock_produce(**kwargs):
-            callback = kwargs["on_delivery"]
-            topic = kwargs["topic"]
-            callback(
-                None,
-                MagicMock(topic=lambda: topic, partition=lambda: 0, offset=lambda: 123),
-            )
-
-        mock_instance.produce.side_effect = mock_produce
-
-        # Create producer
-        producer = AsyncSmartProducer(basic_config)
-
-        try:
-            # Produce some messages
-            await producer.produce("events", value=b"event1", key=b"user1")
-            await producer.produce("events", value=b"event2", key=b"user2")
-
-            # Poll for events
-            await producer.poll(timeout=0.1)
-
-            # Flush messages
-            remaining = await producer.flush(timeout=5.0)
-            assert remaining == 0
-
-        finally:
-            # Close producer
-            await producer.close()
-            assert producer.closed
-
-    def test_invalid_config_type(self, mock_confluent_producer):
-        """Test that invalid config type raises ValueError."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        with pytest.raises(
-            ValueError, match="config must be SmartProducerConfig instance"
-        ):
-            AsyncSmartProducer({"invalid": "config"})
-
-    @pytest.mark.asyncio
-    async def test_properties_access(
-        self, mock_confluent_producer, basic_config, async_partition_health_monitor
-    ):
-        """Test property accessors."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        producer = AsyncSmartProducer(basic_config, async_partition_health_monitor)
-
-        # Test properties
-        assert producer.topics == ["logs"]
-        assert producer.health_manager == async_partition_health_monitor
-        assert producer.smart_enabled is True
-        assert producer.closed is False
-
-        await producer.close()
-        assert producer.closed is True
-
-    @pytest.mark.asyncio
-    async def test_properties_access_no_health_manager(self, mock_confluent_producer):
-        """Test properties when no health manager is configured."""
-        config = SmartProducerConfig.from_dict(
-            {
-                "bootstrap.servers": "localhost:9092",
-                "topics": ["topic1", "topic2"],
-                "smart_enabled": True,
-                # No health_manager config
-            }
-        )
-
-        mock_class, mock_instance = mock_confluent_producer
-
-        producer = AsyncSmartProducer(config)
-
-        # Test properties
-        assert producer.topics == ["topic1", "topic2"]
-        assert producer.health_manager is None
-        assert producer.smart_enabled is False  # Disabled when no health manager
-        assert producer.closed is False
-
-        # Test that topics property returns a copy (immutable)
-        topics_copy = producer.topics
-        topics_copy.append("modified")
-        assert producer.topics == ["topic1", "topic2"]  # Original unchanged
-
-    @pytest.mark.asyncio
-    async def test_smart_partition_selection(
-        self, mock_confluent_producer, basic_config, async_partition_health_monitor
-    ):
-        """Test smart partition selection with health manager."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        def mock_produce(**kwargs):
-            callback = kwargs["on_delivery"]
-            topic = kwargs["topic"]
-            partition = kwargs.get("partition")
-            callback(
-                None,
-                MagicMock(
-                    topic=lambda: topic, partition=lambda: partition, offset=lambda: 123
-                ),
-            )
-
-        mock_instance.produce.side_effect = mock_produce
-
-        # Mock BasePartitionSelector
-        with patch(
-            "kafka_smart_producer.async_producer.BasePartitionSelector"
-        ) as mock_selector_class:
-            mock_selector = Mock()
-            mock_selector.select_partition.return_value = 2
-            mock_selector_class.return_value = mock_selector
-
-            producer = AsyncSmartProducer(basic_config, async_partition_health_monitor)
-
-            await producer.produce("test-topic", value=b"test-value", key=b"test-key")
-
-            # Should call underlying producer with selected partition
-            mock_instance.produce.assert_called_once()
-            call_kwargs = mock_instance.produce.call_args[1]
-            assert call_kwargs["partition"] == 2
-
-    @pytest.mark.asyncio
-    async def test_explicit_partition_override(
-        self, mock_confluent_producer, basic_config, async_partition_health_monitor
-    ):
-        """Test that explicit partition overrides smart selection."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        def mock_produce(**kwargs):
-            callback = kwargs["on_delivery"]
-            topic = kwargs["topic"]
-            partition = kwargs.get("partition")
-            callback(
-                None,
-                MagicMock(
-                    topic=lambda: topic, partition=lambda: partition, offset=lambda: 123
-                ),
-            )
-
-        mock_instance.produce.side_effect = mock_produce
-
-        # Mock partition selector
-        with patch(
-            "kafka_smart_producer.async_producer.BasePartitionSelector"
-        ) as mock_selector_class:
-            mock_selector = Mock()
-            mock_selector.select_partition.return_value = 2
-            mock_selector_class.return_value = mock_selector
-
-            producer = AsyncSmartProducer(basic_config, async_partition_health_monitor)
-
-            # Produce with explicit partition
-            await producer.produce("test-topic", value=b"test-value", partition=5)
-
-            # Should use explicit partition, not smart selection
-            call_kwargs = mock_instance.produce.call_args[1]
-            assert call_kwargs["partition"] == 5
-
-            # Smart selector should not have been called
-            mock_selector.select_partition.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_produce_with_none_values(
-        self, mock_confluent_producer, basic_config
-    ):
-        """Test produce method filters out None values."""
-        mock_class, mock_instance = mock_confluent_producer
-
-        def mock_produce(**kwargs):
-            callback = kwargs["on_delivery"]
-            topic = kwargs["topic"]
-            callback(
-                None,
-                MagicMock(topic=lambda: topic, partition=lambda: 0, offset=lambda: 123),
-            )
-
-        mock_instance.produce.side_effect = mock_produce
-
-        producer = AsyncSmartProducer(basic_config)
-
-        # Produce with None values
-        await producer.produce(
-            topic="test-topic",
-            value=None,
-            key=None,
-            partition=None,
-            on_delivery=None,
-            timestamp=None,
-            headers=None,
-        )
-
-        # Should only pass non-None parameters
-        call_kwargs = mock_instance.produce.call_args[1]
+    async def test_produce_without_health(self):
+        from kafka_smart_producer.producer import AsyncSmartProducer
+
+        cfg = _config(smart_enabled=False)
+        async with AsyncSmartProducer(cfg) as producer:
+            await producer.produce("test-topic", value=b"data")
+
+        self.mock_producer.produce.assert_called_once()
+        call_kwargs = self.mock_producer.produce.call_args[1]
         assert call_kwargs["topic"] == "test-topic"
+        assert call_kwargs["value"] == b"data"
 
-        # None values should be filtered out (on_delivery becomes async callback)
-        assert "value" not in call_kwargs
-        assert "key" not in call_kwargs
+    @pytest.mark.asyncio
+    async def test_produce_with_explicit_partition(self):
+        from kafka_smart_producer.producer import AsyncSmartProducer
+
+        monitor = MockMonitor({"test-topic": [0, 1, 2]})
+        async with AsyncSmartProducer(_config(), monitor=monitor) as producer:
+            await producer.produce("test-topic", value=b"data", partition=5)
+
+        call_kwargs = self.mock_producer.produce.call_args[1]
+        assert call_kwargs["partition"] == 5
+
+    @pytest.mark.asyncio
+    async def test_produce_selects_healthy_partition(self):
+        from kafka_smart_producer.producer import AsyncSmartProducer
+
+        monitor = MockMonitor({"test-topic": [1, 2]})
+        async with AsyncSmartProducer(_config(), monitor=monitor) as producer:
+            await producer.produce("test-topic", value=b"data")
+
+        call_kwargs = self.mock_producer.produce.call_args[1]
+        assert call_kwargs["partition"] in [1, 2]
+
+    @pytest.mark.asyncio
+    async def test_produce_fallback_when_no_healthy(self):
+        from kafka_smart_producer.producer import AsyncSmartProducer
+
+        monitor = MockMonitor({"test-topic": []})
+        async with AsyncSmartProducer(_config(), monitor=monitor) as producer:
+            await producer.produce("test-topic", value=b"data")
+
+        call_kwargs = self.mock_producer.produce.call_args[1]
         assert "partition" not in call_kwargs
-        assert "timestamp" not in call_kwargs
-        assert "headers" not in call_kwargs
-        # on_delivery will be set to the internal async callback
 
     @pytest.mark.asyncio
-    async def test_string_representation(
-        self, mock_confluent_producer, basic_config, async_partition_health_monitor
-    ):
-        """Test __repr__ method."""
-        mock_class, mock_instance = mock_confluent_producer
+    async def test_key_stickiness(self):
+        from kafka_smart_producer.producer import AsyncSmartProducer
 
-        producer = AsyncSmartProducer(basic_config, async_partition_health_monitor)
-        repr_str = repr(producer)
+        monitor = MockMonitor({"test-topic": [0, 1, 2]})
+        producer = AsyncSmartProducer(_config(key_stickiness=True), monitor=monitor)
 
-        assert "AsyncSmartProducer" in repr_str
-        assert "topics=['logs']" in repr_str or 'topics=["logs"]' in repr_str
-        assert "smart_enabled=True" in repr_str
-        assert "cache_enabled" in repr_str
-        assert "closed=False" in repr_str
+        for _ in range(5):
+            await producer.produce("test-topic", value=b"data", key=b"user-1")
+
+        partitions = [
+            self.mock_producer.produce.call_args_list[i][1].get("partition")
+            for i in range(5)
+        ]
+        assert len(set(partitions)) == 1
+        assert partitions[0] in [0, 1, 2]
 
         await producer.close()
 
-        repr_str = repr(producer)
-        assert "closed=True" in repr_str
-
     @pytest.mark.asyncio
-    async def test_health_manager_creation_failure(
-        self, mock_confluent_producer, basic_config
-    ):
-        """Test graceful handling when health manager creation fails."""
-        mock_class, mock_instance = mock_confluent_producer
+    async def test_key_stickiness_adapts_to_unhealthy(self):
+        from kafka_smart_producer.producer import AsyncSmartProducer
 
-        with patch.object(
-            AsyncSmartProducer, "_create_health_manager", return_value=None
-        ):
-            producer = AsyncSmartProducer(basic_config)
+        monitor = MockMonitor({"test-topic": [0, 1, 2]})
+        producer = AsyncSmartProducer(_config(key_stickiness=True), monitor=monitor)
 
-            # Should handle gracefully
-            assert producer.health_manager is None
-            assert producer.smart_enabled is False  # Disabled when no health manager
-            assert producer._partition_selector is None
+        await producer.produce("test-topic", value=b"v", key=b"key-1")
+        first_partition = self.mock_producer.produce.call_args[1]["partition"]
 
-    @pytest.mark.asyncio
-    async def test_max_workers_configuration(
-        self, mock_confluent_producer, basic_config
-    ):
-        """Test custom max_workers configuration."""
-        mock_class, mock_instance = mock_confluent_producer
+        remaining = [p for p in [0, 1, 2] if p != first_partition]
+        monitor._healthy["test-topic"] = remaining
 
-        # Test custom max_workers
-        producer = AsyncSmartProducer(basic_config, max_workers=12)
-        assert producer._executor._max_workers == 12
+        await producer.produce("test-topic", value=b"v", key=b"key-1")
+        second_partition = self.mock_producer.produce.call_args[1]["partition"]
+        assert second_partition in remaining
 
         await producer.close()
 
-        # Test default max_workers
-        producer2 = AsyncSmartProducer(basic_config)
-        assert producer2._executor._max_workers == 4  # Default value
+    @pytest.mark.asyncio
+    async def test_flush(self):
+        from kafka_smart_producer.producer import AsyncSmartProducer
 
-        await producer2.close()
+        self.mock_producer.flush.return_value = 0
+        async with AsyncSmartProducer(_config(smart_enabled=False)) as producer:
+            result = await producer.flush(timeout=5.0)
+        assert result == 0
 
     @pytest.mark.asyncio
-    async def test_produce_timeout_scenario(
-        self, mock_confluent_producer, basic_config
-    ):
-        """Test produce timeout handling."""
-        mock_class, mock_instance = mock_confluent_producer
+    async def test_close_stops_owned_monitor(self):
+        from kafka_smart_producer.producer import AsyncSmartProducer
 
-        # Mock produce that never calls callback (simulate timeout)
-        def mock_produce(**kwargs):
-            # Don't call the callback - simulate timeout
-            pass
-
-        def mock_poll(timeout):
-            # Never complete delivery
-            return 0
-
-        mock_instance.produce.side_effect = mock_produce
-        mock_instance.poll.side_effect = mock_poll
-
-        producer = AsyncSmartProducer(basic_config)
-
-        # Should timeout and raise TimeoutError
-        with pytest.raises(asyncio.TimeoutError):
-            await producer.produce("test-topic", value=b"test-value", key=b"test-key")
-
+        monitor = MockMonitor({"test-topic": [0]})
+        await monitor.start_async()
+        producer = AsyncSmartProducer(_config(), monitor=monitor)
+        producer._monitor_owned = True
         await producer.close()
+        assert not monitor.is_running
+
+    @pytest.mark.asyncio
+    async def test_close_does_not_stop_external_monitor(self):
+        from kafka_smart_producer.producer import AsyncSmartProducer
+
+        monitor = MockMonitor({"test-topic": [0]})
+        await monitor.start_async()
+        producer = AsyncSmartProducer(_config(), monitor=monitor)
+        await producer.close()
+        assert monitor.is_running
+
+    @pytest.mark.asyncio
+    async def test_produce_after_close_raises(self):
+        from kafka_smart_producer.producer import AsyncSmartProducer
+
+        producer = AsyncSmartProducer(_config(smart_enabled=False))
+        await producer.close()
+        with pytest.raises(RuntimeError, match="closed"):
+            await producer.produce("test-topic", value=b"data")
+
+    @pytest.mark.asyncio
+    async def test_context_manager(self):
+        from kafka_smart_producer.producer import AsyncSmartProducer
+
+        async with AsyncSmartProducer(_config(smart_enabled=False)) as p:
+            await p.produce("test-topic", value=b"data")
+        assert p.closed
+
+    @pytest.mark.asyncio
+    async def test_closed_property(self):
+        from kafka_smart_producer.producer import AsyncSmartProducer
+
+        producer = AsyncSmartProducer(_config(smart_enabled=False))
+        assert not producer.closed
+        await producer.close()
+        assert producer.closed
