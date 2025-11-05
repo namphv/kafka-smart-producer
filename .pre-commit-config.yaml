@@ -24,6 +24,7 @@ repos:
       - id: debug-statements
       - id: name-tests-test
         args: ["--pytest-test-first"]
+        exclude: ^tests/integration/(base_integration_test|validate_infrastructure)\.py$
 
   # Import sorting
   - repo: https://github.com/pycqa/isort
