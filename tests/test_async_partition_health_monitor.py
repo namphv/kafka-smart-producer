@@ -122,7 +122,7 @@ class TestAsyncPartitionHealthMonitorCore:
         monitor = self.create_async_partition_health_monitor(lag_data, config)
 
         # Add topic to monitoring
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
 
         # Force refresh to get initial data
         await monitor.force_refresh("test-topic")
@@ -147,7 +147,7 @@ class TestAsyncPartitionHealthMonitorCore:
         monitor = self.create_async_partition_health_monitor(lag_data, config)
 
         # Add topic and force refresh
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         await monitor.force_refresh("test-topic")
 
         # Test partition health (sync method for producer compatibility)
@@ -160,11 +160,11 @@ class TestAsyncPartitionHealthMonitorCore:
         monitor = self.create_async_partition_health_monitor()
 
         # Add topic
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         assert "test-topic" in monitor._health_data
 
         # Add multiple topics
-        monitor._initialize_topics(["topic-1", "topic-2"])
+        monitor.initialize_topics(["topic-1", "topic-2"])
         assert "topic-1" in monitor._health_data
         assert "topic-2" in monitor._health_data
 
@@ -175,7 +175,7 @@ class TestAsyncPartitionHealthMonitorCore:
         monitor = self.create_async_partition_health_monitor(lag_data)
 
         # Add topic and refresh
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         await monitor.force_refresh("test-topic")
 
         # Get summary
@@ -195,7 +195,7 @@ class TestAsyncPartitionHealthMonitorCore:
 
         async with monitor:
             assert monitor._running
-            monitor._initialize_topics(["test-topic"])
+            monitor.initialize_topics(["test-topic"])
             await monitor.force_refresh("test-topic")
 
         assert not monitor._running
@@ -252,7 +252,7 @@ class TestAsyncPartitionHealthDynamicChanges:
         )
 
         topic = "test-topic"
-        health_monitor._initialize_topics([topic])
+        health_monitor.initialize_topics([topic])
 
         # Start health manager
         await health_monitor.start()
@@ -319,7 +319,7 @@ class TestAsyncPartitionHealthDynamicChanges:
             mode=HealthMode.EMBEDDED,
         )
 
-        health_monitor_lenient._initialize_topics([topic])
+        health_monitor_lenient.initialize_topics([topic])
 
         # Start health monitor so _running is True
         await health_monitor_lenient.start()
@@ -347,7 +347,7 @@ class TestAsyncPartitionHealthDynamicChanges:
             mode=HealthMode.EMBEDDED,
         )
 
-        health_monitor_strict._initialize_topics([topic])
+        health_monitor_strict.initialize_topics([topic])
 
         # Start health monitor so _running is True
         await health_monitor_strict.start()
@@ -380,7 +380,7 @@ class TestAsyncPartitionHealthDynamicChanges:
         )
 
         topic = "test-topic"
-        health_monitor._initialize_topics([topic])
+        health_monitor.initialize_topics([topic])
         await health_monitor.start()
 
         try:
@@ -423,7 +423,7 @@ class TestAsyncPartitionHealthDynamicChanges:
 
         # Initialize topic
         topic = "test-topic"
-        health_monitor._initialize_topics([topic])
+        health_monitor.initialize_topics([topic])
 
         # Start health monitor so _running is True
         await health_monitor.start()
@@ -475,7 +475,7 @@ class TestAsyncPartitionHealthDynamicChanges:
         )
 
         topics = ["topic1", "topic2"]
-        health_monitor._initialize_topics(topics)
+        health_monitor.initialize_topics(topics)
         await health_monitor.start()
 
         try:
@@ -538,7 +538,7 @@ class TestAsyncPartitionHealthDynamicChanges:
 
         # Initialize multiple topics
         topics = ["topic1", "topic2", "topic3"]
-        health_monitor._initialize_topics(topics)
+        health_monitor.initialize_topics(topics)
 
         # Start health monitor so _running is True
         await health_monitor.start()
@@ -594,7 +594,7 @@ class TestAsyncPartitionHealthDynamicChanges:
         )
 
         topic = "test-topic"
-        health_monitor._initialize_topics([topic])
+        health_monitor.initialize_topics([topic])
         await health_monitor.start()
 
         try:
@@ -665,7 +665,7 @@ class TestAsyncPartitionHealthEdgeCases:
         )
 
         topic = "test-topic"
-        health_monitor._initialize_topics([topic])
+        health_monitor.initialize_topics([topic])
 
         # Don't start health monitor
         lag_collector.set_lag_data(topic, {0: 10, 1: 20})
@@ -710,7 +710,7 @@ class TestAsyncPartitionHealthEdgeCases:
         )
 
         topic = "test-topic"
-        health_monitor._initialize_topics([topic])
+        health_monitor.initialize_topics([topic])
         await health_monitor.start()
 
         try:
@@ -745,7 +745,7 @@ class TestAsyncPartitionHealthEdgeCases:
 
         # Initialize topics
         topics = ["topic1", "topic2", "topic3"]
-        health_monitor._initialize_topics(topics)
+        health_monitor.initialize_topics(topics)
 
         # Start health monitor so _running is True
         await health_monitor.start()
@@ -796,7 +796,7 @@ class TestAsyncPartitionHealthEdgeCases:
 
         # Initialize topic
         topic = "test-topic"
-        health_monitor._initialize_topics([topic])
+        health_monitor.initialize_topics([topic])
 
         # Start health monitor so _running is True (triggers initial refresh)
         await health_monitor.start()
@@ -849,7 +849,7 @@ class TestAsyncPartitionHealthErrorHandling:
         )
 
         # Should not crash on force refresh failure
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         try:
             await monitor.force_refresh("test-topic")
         except Exception as e:

@@ -359,7 +359,7 @@ class TestPartitionHealthMonitorCore:
         assert not monitor.is_running
 
         # Test topics initialization
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         assert "test-topic" in monitor._health_data
 
     def test_partition_health_monitor_standalone_mode(
@@ -410,7 +410,7 @@ class TestPartitionHealthMonitorCore:
         )
 
         # Initialize with mock health data
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         monitor._health_data["test-topic"] = {0: 1.0, 1: 0.8, 2: 0.3, 3: 0.0}
 
         # Test getting healthy partitions (>= 0.5 threshold)
@@ -432,7 +432,7 @@ class TestPartitionHealthMonitorCore:
         )
 
         # Initialize with mock health data
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         monitor._health_data["test-topic"] = {0: 1.0, 1: 0.8, 2: 0.3, 3: 0.0}
 
         # Test individual partition health checks
@@ -459,7 +459,7 @@ class TestPartitionHealthMonitorCore:
         )
 
         # Initialize with mock health data
-        monitor._initialize_topics(["topic1", "topic2"])
+        monitor.initialize_topics(["topic1", "topic2"])
         monitor._health_data["topic1"] = {0: 1.0, 1: 0.7, 2: 0.5}  # 2 healthy (>=0.6)
         monitor._health_data["topic2"] = {0: 0.8, 1: 0.4}  # 1 healthy (>=0.6)
 

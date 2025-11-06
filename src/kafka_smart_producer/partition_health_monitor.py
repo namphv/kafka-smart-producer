@@ -92,37 +92,12 @@ class PartitionHealthMonitor:
         """
         Create PartitionHealthMonitor for embedded mode (producer integration).
 
-        This factory method creates a lightweight health manager optimized for
-        integration with SmartProducer. No Redis publishing, minimal features.
-
-        Args:
-            lag_collector: Lag data collector instance
-            topics: Optional list of topics to monitor initially
-
-        Returns:
-            PartitionHealthMonitor configured for embedded mode
-
-        Example:
-            lag_collector = KafkaAdminLagCollector(...)
-            health_manager = PartitionHealthMonitor.embedded(
-                lag_collector, ["orders", "payments"]
-            )
+        Delegates to health_factory.create_sync_embedded_monitor().
+        See health_factory module for implementation details.
         """
-        manager = cls(
-            lag_collector=lag_collector,
-            cache=None,  # No cache for embedded mode
-            health_threshold=0.5,
-            refresh_interval=5.0,
-            max_lag_for_health=1000,
-            mode=HealthMode.EMBEDDED,
-            redis_health_publisher=None,  # No Redis for embedded mode
-        )
+        from .health_factory import create_sync_embedded_monitor
 
-        # Initialize with topics if provided
-        if topics:
-            manager._initialize_topics(topics)
-
-        return manager
+        return create_sync_embedded_monitor(lag_collector, topics)
 
     @classmethod
     def standalone(
@@ -137,72 +112,19 @@ class PartitionHealthMonitor:
         """
         Create PartitionHealthMonitor for standalone mode (monitoring service).
 
-        This factory method creates a full-featured health manager for running
-        as an independent monitoring service with Redis publishing.
-
-        Args:
-            consumer_group: Kafka consumer group to monitor
-            kafka_config: Kafka configuration (bootstrap.servers, security, etc.)
-            topics: Optional list of topics to monitor initially
-            health_threshold: Minimum health score for healthy partitions
-            refresh_interval: Seconds between health refreshes
-            max_lag_for_health: Maximum lag for 0.0 health score
-
-        Returns:
-            PartitionHealthMonitor configured for standalone mode
-
-        Example:
-            health_manager = PartitionHealthMonitor.standalone(
-                consumer_group="my-consumers",
-                kafka_config={"bootstrap.servers": "localhost:9092"},
-                topics=["orders", "payments"]
-            )
+        Delegates to health_factory.create_sync_standalone_monitor().
+        See health_factory module for implementation details.
         """
-        from .cache_factory import CacheFactory
-        from .lag_collector import KafkaAdminLagCollector
+        from .health_factory import create_sync_standalone_monitor
 
-        # Create lag collector
-        lag_collector = KafkaAdminLagCollector(
-            bootstrap_servers=kafka_config.get("bootstrap.servers", "localhost:9092"),
-            consumer_group=consumer_group,
-            **{k: v for k, v in kafka_config.items() if k != "bootstrap.servers"},
+        return create_sync_standalone_monitor(
+            consumer_group,
+            kafka_config,
+            topics,
+            health_threshold,
+            refresh_interval,
+            max_lag_for_health,
         )
-
-        # Create Redis publisher for standalone mode
-        redis_publisher = None
-        try:
-            # Try to create Redis publisher with default config
-            import os
-
-            redis_config = {
-                "redis_host": os.getenv("REDIS_HOST", "localhost"),
-                "redis_port": int(os.getenv("REDIS_PORT", "6379")),
-                "redis_db": int(os.getenv("REDIS_DB", "0")),
-            }
-            redis_publisher = CacheFactory.create_remote_cache(redis_config)
-            if redis_publisher:
-                logger.info("Redis health publisher enabled for standalone mode")
-        except Exception as e:
-            logger.warning(
-                f"Failed to create Redis publisher: {e}. Continuing without Redis."
-            )
-
-        # Create health manager
-        manager = cls(
-            lag_collector=lag_collector,
-            cache=None,  # No additional cache needed
-            health_threshold=health_threshold,
-            refresh_interval=refresh_interval,
-            max_lag_for_health=max_lag_for_health,
-            mode=HealthMode.STANDALONE,
-            redis_health_publisher=redis_publisher,
-        )
-
-        # Initialize with topics if provided
-        if topics:
-            manager._initialize_topics(topics)
-
-        return manager
 
     @classmethod
     def from_config(
@@ -211,66 +133,12 @@ class PartitionHealthMonitor:
         """
         Factory method to create PartitionHealthMonitor from unified configuration.
 
-        Args:
-            health_config: Health manager configuration
-            kafka_config: Producer's Kafka configuration (kafka authentication config)
-
-        Returns:
-            Configured PartitionHealthMonitor instance
-
-        Raises:
-            ValueError: If configuration is invalid
-            RuntimeError: If component creation fails
+        Delegates to health_factory.create_sync_monitor_from_config().
+        See health_factory module for implementation details.
         """
-        if not isinstance(kafka_config, dict):
-            raise ValueError("Kafka configuration must be a dictionary")
+        from .health_factory import create_sync_monitor_from_config
 
-        if not isinstance(health_config, PartitionHealthMonitorConfig):
-            raise ValueError(
-                "Health configuration must be a PartitionHealthMonitorConfig instance"
-            )
-
-        # Extract common settings (already validated by PartitionHealthMonitorConfig)
-        health_threshold = health_config.health_threshold
-        refresh_interval = health_config.refresh_interval
-        max_lag_for_health = health_config.max_lag_for_health
-
-        # Create components using helper functions
-        lag_collector = create_lag_collector_from_config(health_config, kafka_config)
-        cache = create_cache_from_config(health_config)
-
-        # Determine operation mode and Redis publisher
-        mode_str = health_config.get_sync_option("mode", "standalone")
-        mode = (
-            HealthMode.from_string(mode_str) if isinstance(mode_str, str) else mode_str
-        )
-        redis_publisher = None
-
-        if mode == HealthMode.STANDALONE:
-            # Create Redis publisher for standalone mode
-            from .cache_factory import CacheFactory
-
-            # Use cache config for Redis connection if available
-            if hasattr(health_config, "cache") and health_config.cache:
-                redis_publisher = CacheFactory.create_remote_cache(
-                    health_config.cache.__dict__
-                )
-                if redis_publisher:
-                    logger.info("Redis health publisher enabled for standalone mode")
-                else:
-                    logger.warning(
-                        "Failed to create Redis publisher, continuing without Redis"
-                    )
-
-        return cls(
-            lag_collector=lag_collector,
-            cache=cache,
-            health_threshold=health_threshold,
-            refresh_interval=refresh_interval,
-            max_lag_for_health=max_lag_for_health,
-            mode=mode,
-            redis_health_publisher=redis_publisher,
-        )
+        return create_sync_monitor_from_config(health_config, kafka_config)
 
     def start(self) -> None:
         """
@@ -390,7 +258,7 @@ class PartitionHealthMonitor:
 
         return summary
 
-    def _initialize_topics(self, topics: list[str]) -> None:
+    def initialize_topics(self, topics: list[str]) -> None:
         """
         Initialize health monitoring for a list of topics.
 

@@ -90,7 +90,7 @@ class TestAsyncPartitionHealthMonitorCoverage:
             mode=HealthMode.EMBEDDED,
         )
         
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         await monitor._refresh_single_topic("test-topic")
         
         is_healthy_0 = monitor.is_partition_healthy("test-topic", 0)
@@ -154,7 +154,7 @@ class TestPartitionHealthMonitorCoverage:
             mode=HealthMode.EMBEDDED,
         )
         
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         monitor._refresh_all_topics()
         
         is_healthy_0 = monitor.is_partition_healthy("test-topic", 0)

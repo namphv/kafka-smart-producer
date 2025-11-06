@@ -218,7 +218,7 @@ def create_health_manager_from_config(
 
             # Initialize with topics if provided
             if config.topics:
-                health_manager._initialize_topics(config.topics)
+                health_manager.initialize_topics(config.topics)
 
             logger.info(
                 f"Created PartitionHealthMonitor for embedded mode with "
@@ -245,7 +245,7 @@ def create_health_manager_from_config(
 
             # Initialize with topics if provided
             if config.topics:
-                health_manager._initialize_topics(config.topics)
+                health_manager.initialize_topics(config.topics)
 
             logger.info(
                 f"Created AsyncPartitionHealthMonitor for embedded mode with "

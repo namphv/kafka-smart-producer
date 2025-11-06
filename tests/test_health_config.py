@@ -183,7 +183,7 @@ class TestPartitionHealthMonitor:
         monitor = self.create_sync_partition_health_monitor(lag_data, config)
 
         # Initialize topics monitoring
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
 
         # Force refresh to get initial data
         monitor.force_refresh("test-topic")
@@ -207,7 +207,7 @@ class TestPartitionHealthMonitor:
         monitor = self.create_sync_partition_health_monitor(lag_data, config)
 
         # Add topic and force refresh
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         monitor.force_refresh("test-topic")
 
         # Test partition health (partition 2 with lowest lag should be healthy)
@@ -220,11 +220,11 @@ class TestPartitionHealthMonitor:
         monitor = self.create_sync_partition_health_monitor()
 
         # Add topic
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         assert "test-topic" in monitor._health_data
 
         # Add multiple topics
-        monitor._initialize_topics(["topic-1", "topic-2"])
+        monitor.initialize_topics(["topic-1", "topic-2"])
         assert "topic-1" in monitor._health_data
         assert "topic-2" in monitor._health_data
 
@@ -234,7 +234,7 @@ class TestPartitionHealthMonitor:
         monitor = self.create_sync_partition_health_monitor(lag_data)
 
         # Add topic and refresh
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         monitor.force_refresh("test-topic")
 
         # Get summary
@@ -263,10 +263,10 @@ class TestPartitionHealthMonitor:
         mock_lag_collector = Mock()
 
         with patch(
-            "kafka_smart_producer.partition_health_monitor.create_lag_collector_from_config"
+            "kafka_smart_producer.health_factory.create_lag_collector_from_config"
         ) as mock_create_lag:
             with patch(
-                "kafka_smart_producer.partition_health_monitor.create_cache_from_config"
+                "kafka_smart_producer.health_factory.create_cache_from_config"
             ) as mock_create_cache:
                 mock_create_lag.return_value = mock_lag_collector
                 mock_create_cache.return_value = None
@@ -295,13 +295,13 @@ class TestPartitionHealthMonitorComparison:
         async_monitor = self.create_async_monitor(lag_data, config)
 
         # Test sync monitor
-        sync_monitor._initialize_topics(["test-topic"])
+        sync_monitor.initialize_topics(["test-topic"])
         sync_monitor.force_refresh("test-topic")
         sync_healthy = sync_monitor.get_healthy_partitions("test-topic")
 
         # Test async monitor
         async def test_async():
-            async_monitor._initialize_topics(["test-topic"])
+            async_monitor.initialize_topics(["test-topic"])
             await async_monitor.force_refresh("test-topic")
             return async_monitor.get_healthy_partitions("test-topic")
 
@@ -348,7 +348,7 @@ class TestErrorHandling:
         )
 
         # Should not crash on force refresh failure
-        monitor._initialize_topics(["test-topic"])
+        monitor.initialize_topics(["test-topic"])
         try:
             monitor.force_refresh("test-topic")
         except Exception as e:
