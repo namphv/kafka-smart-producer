@@ -18,11 +18,11 @@ import pytest
 from kafka_smart_producer.caching import (
     CacheConfig,
     CacheEntry,
-    CacheFactory,
     CacheTimeoutError,
     CacheUnavailableError,
     DefaultLocalCache,
 )
+from kafka_smart_producer.cache_factory import CacheFactory
 from kafka_smart_producer.exceptions import CacheError
 
 

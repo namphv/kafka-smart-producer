@@ -505,7 +505,7 @@ class TestPartitionHealthMonitorModes:
         from kafka_smart_producer.partition_health_monitor import PartitionHealthMonitor
 
         with patch("kafka_smart_producer.lag_collector.KafkaAdminLagCollector"):
-            with patch("kafka_smart_producer.caching.CacheFactory.create_remote_cache"):
+            with patch("kafka_smart_producer.cache_factory.CacheFactory.create_remote_cache"):
                 monitor = PartitionHealthMonitor.standalone(
                     consumer_group="test-group",
                     kafka_config={"bootstrap.servers": "localhost:9092"},

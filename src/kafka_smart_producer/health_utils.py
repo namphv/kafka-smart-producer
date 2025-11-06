@@ -167,7 +167,7 @@ def create_cache_from_config(
     cache_ttl_seconds = health_config.cache_ttl_seconds
 
     try:
-        from .caching import CacheFactory
+        from .cache_factory import CacheFactory
 
         cache_config = {
             "cache_max_size": cache_max_size,

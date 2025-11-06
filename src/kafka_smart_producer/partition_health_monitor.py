@@ -158,7 +158,7 @@ class PartitionHealthMonitor:
                 topics=["orders", "payments"]
             )
         """
-        from .caching import CacheFactory
+        from .cache_factory import CacheFactory
         from .lag_collector import KafkaAdminLagCollector
 
         # Create lag collector
@@ -248,7 +248,7 @@ class PartitionHealthMonitor:
 
         if mode == HealthMode.STANDALONE:
             # Create Redis publisher for standalone mode
-            from .caching import CacheFactory
+            from .cache_factory import CacheFactory
 
             # Use cache config for Redis connection if available
             if hasattr(health_config, "cache") and health_config.cache:

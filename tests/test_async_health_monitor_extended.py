@@ -57,7 +57,7 @@ class TestFactoryMethods:
         """Test standalone() factory with successful setup."""
         # Patch where classes are imported (inside standalone method)
         with patch("kafka_smart_producer.lag_collector.KafkaAdminLagCollector") as mock_collector_class, \
-             patch("kafka_smart_producer.caching.CacheFactory") as mock_cache_factory:
+             patch("kafka_smart_producer.cache_factory.CacheFactory") as mock_cache_factory:
 
             # Mock lag collector
             mock_collector = Mock()
@@ -99,7 +99,7 @@ class TestFactoryMethods:
     async def test_standalone_factory_redis_failure(self):
         """Test standalone() factory handles Redis failures gracefully."""
         with patch("kafka_smart_producer.lag_collector.KafkaAdminLagCollector") as mock_collector_class, \
-             patch("kafka_smart_producer.caching.CacheFactory") as mock_cache_factory:
+             patch("kafka_smart_producer.cache_factory.CacheFactory") as mock_cache_factory:
 
             # Mock lag collector
             mock_collector = Mock()

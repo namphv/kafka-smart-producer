@@ -8,7 +8,7 @@ import logging
 import random
 from typing import TYPE_CHECKING, Optional, Union
 
-from .caching import CacheFactory
+from .cache_factory import CacheFactory
 
 if TYPE_CHECKING:
     from .async_partition_health_monitor import AsyncPartitionHealthMonitor

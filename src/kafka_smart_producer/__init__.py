@@ -20,7 +20,6 @@ from .async_producer import AsyncSmartProducer
 from .caching import (
     CacheConfig,
     CacheEntry,
-    CacheFactory,
     CacheTimeoutError,
     CacheUnavailableError,
     DefaultHybridCache,
@@ -30,6 +29,7 @@ from .caching import (
     LocalCache,
     RemoteCache,
 )
+from .cache_factory import CacheFactory
 
 # Exception classes
 from .exceptions import (
