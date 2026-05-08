@@ -1,13 +1,11 @@
 [project]
 name = "kafka-smart-producer"
-version = "0.0.1"
+version = "0.1.0"
 description = "Intelligent Kafka producer with real-time, lag-aware partition selection"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "confluent-kafka>=2.0.0",
-    "redis>=6.1.1",
-    "cachetools>=5.0.0",
 ]
 authors = [
     {name = "Pham Nam", email = "namph.data@gmail.com"},
@@ -29,9 +27,10 @@ classifiers = [
 [project.optional-dependencies]
 redis = ["redis>=4.0.0"]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "black>=23.0.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "black>=24.0.0",
     "mypy>=1.0.0",
     "ruff>=0.1.0",
     "pre-commit>=3.0.0",
@@ -76,7 +75,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"examples/*" = ["E501"]  # Allow long lines in examples
+"examples/*" = ["E501"]
+"tests/integration/*" = ["E501", "S607", "S110", "B023"]
 
 [tool.ruff]
 line-length = 88
@@ -85,10 +85,6 @@ line-length = 88
 profile = "black"
 line_length = 88
 known_first_party = ["kafka_smart_producer"]
-
-[tool.pydocstyle]
-convention = "google"
-add-ignore = ["D100", "D104", "D105", "D107"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
@@ -112,9 +108,6 @@ omit = [
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
-    "if self.debug:",
-    "if settings.DEBUG",
-    "raise AssertionError",
     "raise NotImplementedError",
     "if 0:",
     "if __name__ == .__main__.:",
@@ -136,10 +129,9 @@ dev = [
     "isort>=5.13.2",
     "mypy>=1.14.1",
     "pre-commit>=3.5.0",
-    "pydocstyle>=6.3.0",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=6.2.1",
+    "redis>=4.0.0",
     "ruff>=0.12.2",
-    "types-cachetools>=5.0.0",
 ]

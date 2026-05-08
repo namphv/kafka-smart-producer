@@ -1,85 +1,58 @@
 """
-Kafka Smart Producer - Intelligent Kafka producer with real-time, lag-aware partition
-selection.
-
-This library extends confluent-kafka-python with smart partition selection based on
-consumer lag monitoring to avoid "hot partitions" and improve throughput.
+Kafka Smart Producer - Intelligent Kafka producer with lag-aware partition selection.
 """
 
+from __future__ import annotations
+
 __version__ = "0.1.0"
-__author__ = "Your Name"
-__email__ = "your.email@example.com"
 
-# Health management
-from .async_partition_health_monitor import AsyncPartitionHealthMonitor
+# Config
+from .config import SmartProducerConfig
 
-# Main producer classes
-from .async_producer import AsyncSmartProducer
-
-# Caching system
-from .caching import (
-    CacheConfig,
-    CacheEntry,
-    CacheFactory,
-    CacheTimeoutError,
-    CacheUnavailableError,
-    DefaultHybridCache,
-    DefaultLocalCache,
-    DefaultRemoteCache,
-    HybridCache,
-    LocalCache,
-    RemoteCache,
-)
-
-# Exception classes
+# Exceptions
 from .exceptions import (
     CacheError,
     ConfigurationError,
-    HealthManagerError,
+    HealthError,
     LagDataUnavailableError,
     PartitionSelectionError,
     SmartProducerError,
 )
 
-# Configuration
-from .health_config import HealthManagerConfig
-from .partition_health_monitor import PartitionHealthMonitor
-from .producer_config import SmartProducerConfig
+# Lag collection
+from .health.collectors.kafka_admin import KafkaAdminLagCollector
 
-# Core protocol interfaces
-from .protocols import LagDataCollector
-from .sync_producer import SmartProducer
+# Health monitoring
+from .health.monitor import PartitionHealthMonitor
+from .health.protocols import HealthScorer, HealthSignalCollector, PartitionSelector
+from .health.scorer import LinearHealthScorer
+
+# Partition selection
+from .partition.selector import RandomHealthySelector
+
+# Producers
+from .producer import AsyncSmartProducer, SmartProducer
 
 __all__ = [
-    # Protocols
-    "LagDataCollector",
-    # "CacheBackend",
-    # Exceptions
-    "SmartProducerError",
-    "LagDataUnavailableError",
-    "HealthManagerError",
-    "CacheError",
-    "PartitionSelectionError",
-    "ConfigurationError",
-    # Caching system
-    "LocalCache",
-    "RemoteCache",
-    "HybridCache",
-    "DefaultLocalCache",
-    "DefaultRemoteCache",
-    "DefaultHybridCache",
-    "CacheConfig",
-    "CacheEntry",
-    "CacheFactory",
-    "CacheTimeoutError",
-    "CacheUnavailableError",
-    # Configuration
-    "HealthManagerConfig",
-    "SmartProducerConfig",
-    # Health management
-    "PartitionHealthMonitor",
-    "AsyncPartitionHealthMonitor",
-    # Producer classes
+    # Producers
     "SmartProducer",
     "AsyncSmartProducer",
+    # Config
+    "SmartProducerConfig",
+    # Health
+    "PartitionHealthMonitor",
+    "KafkaAdminLagCollector",
+    "LinearHealthScorer",
+    "RandomHealthySelector",
+    # Protocols
+    "HealthSignalCollector",
+    "HealthScorer",
+    "PartitionSelector",
+    # Exceptions
+    "SmartProducerError",
+    "ConfigurationError",
+    "LagDataUnavailableError",
+    "HealthError",
+    "CacheError",
+    "PartitionSelectionError",
 ]
